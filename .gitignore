@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Entorno y credenciales
+.env
+*.env
+config.local.*
+
+# Imágenes subidas por los usuarios en tiempo de ejecución
+backend/uploads/
+backend/temp/
+
+# Modelos entrenados (pesan mucho; van fuera del repo)
+*.tflite
+*.h5
+*.pb
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
