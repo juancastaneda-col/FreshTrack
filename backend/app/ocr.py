@@ -7,6 +7,9 @@ sencilla que mejora bastante el resultado frente a usar una sola
 configuración fija.
 """
 
+import os
+import shutil
+
 import pytesseract
 from pytesseract import Output
 
@@ -18,6 +21,25 @@ from .preprocesamiento import preparar_variantes
 # de líneas. El modo automático tiende a confundirse con los logos.
 CONFIG_TESSERACT = "--oem 3 --psm 6"
 IDIOMA = "spa"
+
+
+def _configurar_tesseract():
+    """Encuentra Tesseract aunque su carpeta no este en el PATH de Windows."""
+    configurado = os.getenv("TESSERACT_CMD")
+    candidatos = [
+        configurado,
+        shutil.which("tesseract"),
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ]
+    for candidato in candidatos:
+        if candidato and os.path.isfile(candidato):
+            pytesseract.pytesseract.tesseract_cmd = candidato
+            return candidato
+    return None
+
+
+_configurar_tesseract()
 
 
 def _confianza_promedio(datos):

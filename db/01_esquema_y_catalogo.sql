@@ -21,6 +21,9 @@ CREATE TABLE usuario (
     creado_en      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
+-- Evita duplicados como Usuario@correo.com y usuario@correo.com.
+CREATE UNIQUE INDEX uq_usuario_correo_normalizado ON usuario (LOWER(correo));
+
 CREATE TABLE dispositivo (
     id_dispositivo BIGSERIAL     PRIMARY KEY,
     id_usuario     BIGINT        NOT NULL REFERENCES usuario(id_usuario) ON DELETE CASCADE,
@@ -113,6 +116,7 @@ CREATE TABLE linea_detectada (
     id_alimento_sugerido INT           REFERENCES alimento(id_alimento),
     cantidad_detectada   NUMERIC(10,3),
     id_unidad            SMALLINT      REFERENCES unidad_medida(id_unidad),
+    id_condicion         SMALLINT      REFERENCES condicion_almacenamiento(id_condicion),
     confianza            NUMERIC(4,3)  CHECK (confianza BETWEEN 0 AND 1),
     confirmado           BOOLEAN       NOT NULL DEFAULT FALSE,
     UNIQUE (id_escaneo, numero_linea)
