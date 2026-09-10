@@ -235,6 +235,74 @@ def salud():
     return {"estado": "ok"}
 
 
+@app.get("/registro", response_class=HTMLResponse)
+def pagina_registro():
+  """Formulario independiente para crear una cuenta."""
+  return """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FreshTrack — Crear cuenta</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px;
+           background: #f5f6f8; color: #1a1a1a; }
+    h1 { font-size: 20px; }
+    .caja { max-width: 480px; background: #fff; border-radius: 12px; padding: 16px;
+            margin: 0 auto 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    button { width: 100%; padding: 14px; font-size: 16px; border: 0;
+             border-radius: 10px; background: #1a4fd6; color: #fff; }
+    button:disabled { background: #9aa5b8; }
+    label { display: block; font-size: 13px; margin: 10px 0 4px; }
+    input { box-sizing: border-box; width: 100%; padding: 12px;
+            border: 1px solid #c8ceda; border-radius: 8px; font-size: 16px; }
+    .secundario { display: block; box-sizing: border-box; background: #e5e9f2;
+                  color: #1a1a1a; margin-top: 8px; text-align: center;
+                  text-decoration: none; }
+    .error { color: #b3261e; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="caja">
+    <h1>FreshTrack</h1>
+    <h2>Crear cuenta</h2>
+    <label for="correo">Correo electronico</label>
+    <input type="email" id="correo" autocomplete="email" required>
+    <label for="password">Contrasena</label>
+    <input type="password" id="password" minlength="8" autocomplete="new-password" required>
+    <button id="crear">Crear cuenta</button>
+    <a class="secundario" href="/">Volver a iniciar sesion</a>
+    <div class="error" id="error-registro" role="alert"></div>
+  </div>
+
+<script>
+const botonCrear = document.getElementById('crear');
+const errorRegistro = document.getElementById('error-registro');
+
+botonCrear.onclick = async () => {
+  errorRegistro.textContent = '';
+  botonCrear.disabled = true;
+  try {
+    const respuesta = await fetch('/api/v1/auth/registro', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({correo: document.getElementById('correo').value,
+                            password: document.getElementById('password').value})
+    });
+    const json = await respuesta.json();
+    if (!respuesta.ok) throw new Error(json.detail || 'No fue posible crear la cuenta');
+    window.location.href = '/';
+  } catch (error) {
+    errorRegistro.textContent = error.message;
+    botonCrear.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
+"""
+
+
 @app.post("/api/v1/facturas/escanear")
 async def escanear_factura(archivo: UploadFile = File(...), usuario=Depends(usuario_actual)):
     """Recibe la foto de una factura y devuelve los productos detectados."""
@@ -407,8 +475,7 @@ function mostrarSesion(correo) {
 
 document.getElementById('iniciar').onclick = () => autenticar('/api/v1/auth/login')
   .catch(error => errorAcceso.textContent = error.message);
-document.getElementById('registrar').onclick = () => autenticar('/api/v1/auth/registro')
-  .catch(error => errorAcceso.textContent = error.message);
+document.getElementById('registrar').onclick = () => window.location.href = '/registro';
 document.getElementById('salir').onclick = async () => {
   await fetch('/api/v1/auth/logout', {method: 'POST'});
   window.location.reload();
