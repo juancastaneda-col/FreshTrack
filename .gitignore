@@ -15,6 +15,18 @@ config.local.*
 backend/uploads/
 backend/temp/
 
+# Base de datos local con datos de usuarios (nunca subir a git)
+backend/freshtrack.db
+*.sqlite
+*.sqlite3
+
+# Facturas sintéticas generadas por backend/pruebas/generar_facturas.py
+backend/pruebas/facturas/*.png
+
+# Cookies de pruebas con curl
+cookies.txt
+backend/cookies.txt
+
 # Modelos entrenados (pesan mucho; van fuera del repo)
 *.tflite
 *.h5

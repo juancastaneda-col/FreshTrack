@@ -94,6 +94,10 @@ def _migrar_columnas(conexion):
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN id_escaneo INTEGER")
     if "creado_en" not in columnas:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN creado_en TEXT")
+    if "id_alimento" not in columnas:
+        conexion.execute("ALTER TABLE item_inventario ADD COLUMN id_alimento INTEGER")
+    if "fecha_vencimiento_est" not in columnas:
+        conexion.execute("ALTER TABLE item_inventario ADD COLUMN fecha_vencimiento_est TEXT")
 
 
 def crear_sesion(conexion, id_usuario, expira_en):

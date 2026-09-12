@@ -7,17 +7,19 @@ confirme (eso ya es HU-04).
 """
 
 import time
+from datetime import date
 
 import cv2
 import numpy as np
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
-from fastapi.responses import HTMLResponse
 
+from . import catalogo
 from .catalogo import CATALOGO_ALIAS
 from .matching import asociar_catalogo
 from .ocr import extraer_texto
 from .parser_factura import parsear_factura
+from .prototipo import router as prototipo_router
 from .auth import fecha_expiracion, hash_password, usuario_actual, validar_correo, verificar_password
 from .storage import conectar, crear_sesion
 
@@ -26,6 +28,8 @@ app = FastAPI(
     description="HU-03 · Escanear factura de mercado",
     version="1.0.0",
 )
+
+app.include_router(prototipo_router)
 
 TAMANO_MAXIMO = 10 * 1024 * 1024          # 10 MB
 FORMATOS_VALIDOS = {"image/jpeg", "image/png", "image/webp"}
@@ -41,6 +45,7 @@ class Credenciales(BaseModel):
 
 
 class ItemInventario(BaseModel):
+  id_alimento: int | None = None
   nombre: str = Field(min_length=1, max_length=120)
   cantidad: float = Field(gt=0)
   unidad: str = Field(default="UND", min_length=1, max_length=10)
@@ -115,17 +120,41 @@ def listar_inventario(usuario=Depends(usuario_actual)):
   return {"items": [dict(fila) for fila in filas]}
 
 
+@app.get("/api/v1/catalogo")
+def buscar_catalogo(q: str, usuario=Depends(usuario_actual)):
+  return {"resultados": catalogo.buscar(q)}
+
+
 @app.post("/api/v1/inventario", status_code=201)
 def agregar_inventario(item: ItemInventario, usuario=Depends(usuario_actual)):
+  hoy = date.today()
+  aviso = None
+  vencimiento = None
+  info = None
+  if item.id_alimento is not None:
+    info = catalogo.obtener(item.id_alimento)
+    if info is None:
+      raise HTTPException(status_code=404, detail="El alimento no esta en el catalogo")
+    vencimiento = catalogo.calcular_vencimiento(item.id_alimento, item.condicion, hoy)
+  else:
+    aviso = ("Este producto no esta en el catalogo, no se pudo calcular "
+             "una fecha de vencimiento estimada.")
+  nombre = info["nombre"] if info else item.nombre.strip()
+  vencimiento_iso = vencimiento.isoformat() if vencimiento else None
   with conectar() as conexion:
     fila = conexion.execute(
-      "INSERT INTO item_inventario (id_usuario, nombre, cantidad, unidad, condicion) "
-      "VALUES (?, ?, ?, ?, ?) "
-      "RETURNING id_item, nombre, cantidad, unidad, condicion, situacion",
-      (usuario["id_usuario"], item.nombre.strip(), item.cantidad,
-       item.unidad.upper(), item.condicion),
+      "INSERT INTO item_inventario "
+      "(id_usuario, id_alimento, nombre, cantidad, unidad, condicion, fecha_vencimiento_est) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?) "
+      "RETURNING id_item, id_alimento, nombre, cantidad, unidad, condicion, "
+      "situacion, fecha_vencimiento_est",
+      (usuario["id_usuario"], item.id_alimento, nombre, item.cantidad,
+       item.unidad.upper(), item.condicion, vencimiento_iso),
     ).fetchone()
-  return dict(fila)
+  resultado = dict(fila)
+  if aviso:
+    resultado["aviso"] = aviso
+  return resultado
 
 
 def _linea_dict(fila):
@@ -139,6 +168,7 @@ def _linea_dict(fila):
     "confianza": fila["confianza"],
     "condicion": fila["condicion"],
     "confirmada": bool(fila["confirmada"]),
+    "en_catalogo": fila["id_alimento_sugerido"] is not None,
   }
 
 
@@ -277,74 +307,6 @@ def salud():
     return {"estado": "ok"}
 
 
-@app.get("/registro", response_class=HTMLResponse)
-def pagina_registro():
-  """Formulario independiente para crear una cuenta."""
-  return """
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FreshTrack — Crear cuenta</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px;
-           background: #f5f6f8; color: #1a1a1a; }
-    h1 { font-size: 20px; }
-    .caja { max-width: 480px; background: #fff; border-radius: 12px; padding: 16px;
-            margin: 0 auto 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    button { width: 100%; padding: 14px; font-size: 16px; border: 0;
-             border-radius: 10px; background: #1a4fd6; color: #fff; }
-    button:disabled { background: #9aa5b8; }
-    label { display: block; font-size: 13px; margin: 10px 0 4px; }
-    input { box-sizing: border-box; width: 100%; padding: 12px;
-            border: 1px solid #c8ceda; border-radius: 8px; font-size: 16px; }
-    .secundario { display: block; box-sizing: border-box; background: #e5e9f2;
-                  color: #1a1a1a; margin-top: 8px; text-align: center;
-                  text-decoration: none; }
-    .error { color: #b3261e; margin-top: 10px; }
-  </style>
-</head>
-<body>
-  <div class="caja">
-    <h1>FreshTrack</h1>
-    <h2>Crear cuenta</h2>
-    <label for="correo">Correo electronico</label>
-    <input type="email" id="correo" autocomplete="email" required>
-    <label for="password">Contrasena</label>
-    <input type="password" id="password" minlength="8" autocomplete="new-password" required>
-    <button id="crear">Crear cuenta</button>
-    <a class="secundario" href="/">Volver a iniciar sesion</a>
-    <div class="error" id="error-registro" role="alert"></div>
-  </div>
-
-<script>
-const botonCrear = document.getElementById('crear');
-const errorRegistro = document.getElementById('error-registro');
-
-botonCrear.onclick = async () => {
-  errorRegistro.textContent = '';
-  botonCrear.disabled = true;
-  try {
-    const respuesta = await fetch('/api/v1/auth/registro', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({correo: document.getElementById('correo').value,
-                            password: document.getElementById('password').value})
-    });
-    const json = await respuesta.json();
-    if (!respuesta.ok) throw new Error(json.detail || 'No fue posible crear la cuenta');
-    window.location.href = '/';
-  } catch (error) {
-    errorRegistro.textContent = error.message;
-    botonCrear.disabled = false;
-  }
-};
-</script>
-</body>
-</html>
-"""
-
-
 @app.post("/api/v1/facturas/escanear")
 async def escanear_factura(archivo: UploadFile = File(...), usuario=Depends(usuario_actual)):
     """Recibe la foto de una factura y devuelve los productos detectados."""
@@ -415,230 +377,8 @@ async def escanear_factura(archivo: UploadFile = File(...), usuario=Depends(usua
                 "unidad": p["unidad"],
                 "confianza": p["confianza"],
                 "confirmado": p["confirmado"],
+                "en_catalogo": p["id_alimento_sugerido"] is not None,
             }
             for p in productos
         ],
     }
-
-
-@app.get("/", response_class=HTMLResponse)
-def pagina_prueba():
-    """Página mínima para probar el escaneo desde el celular.
-
-    No es la app final: sirve para que el equipo valide el OCR con
-    facturas reales antes de integrarlo al frontend móvil.
-    """
-    return """
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FreshTrack — Mi inventario</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px;
-           background: #f5f6f8; color: #1a1a1a; }
-    h1 { font-size: 20px; }
-    .caja { background: #fff; border-radius: 12px; padding: 16px;
-            margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    button { width: 100%; padding: 14px; font-size: 16px; border: 0;
-             border-radius: 10px; background: #1a4fd6; color: #fff; }
-    button:disabled { background: #9aa5b8; }
-    input[type=file] { width: 100%; margin-bottom: 12px; }
-    .item { border-bottom: 1px solid #eee; padding: 10px 0; }
-    .item:last-child { border-bottom: 0; }
-    .nombre { font-weight: 600; }
-    .crudo { color: #777; font-size: 12px; }
-    .conf { font-size: 12px; }
-    .alta { color: #1a7f37; } .baja { color: #b35c00; } .nula { color: #b3261e; }
-    .fila { display: grid; grid-template-columns: 1fr 90px 90px; gap: 8px; align-items: center; margin: 8px 0; }
-    .fila input, .fila select { min-width: 0; padding: 9px; border: 1px solid #c8ceda; border-radius: 6px; }
-    .fila button { padding: 9px; font-size: 13px; }
-    .acciones { display: flex; gap: 8px; margin-top: 12px; }
-    .acciones button { flex: 1; }
-    .aviso { background: #fff4e5; border-left: 4px solid #e08b00;
-             padding: 10px; border-radius: 6px; margin-bottom: 12px; }
-    .oculto { display: none; }
-    .error { color: #b3261e; margin-top: 10px; }
-    .secundario { background: #e5e9f2; color: #1a1a1a; margin-top: 8px; }
-    label { display: block; font-size: 13px; margin: 10px 0 4px; }
-    input[type=email], input[type=password] { box-sizing: border-box; width: 100%;
-      padding: 12px; border: 1px solid #c8ceda; border-radius: 8px; font-size: 16px; }
-  </style>
-</head>
-<body>
-  <h1>FreshTrack</h1>
-
-  <div class="caja" id="acceso">
-    <h2>Tu inventario, solo tuyo</h2>
-    <label for="correo">Correo electronico</label>
-    <input type="email" id="correo" autocomplete="email">
-    <label for="password">Contrasena</label>
-    <input type="password" id="password" minlength="8" autocomplete="current-password">
-    <button id="iniciar">Iniciar sesion</button>
-    <button class="secundario" id="registrar">Crear cuenta</button>
-    <div class="error" id="error-acceso" role="alert"></div>
-  </div>
-
-  <div class="caja oculto" id="cuenta">
-    <b id="usuario"></b>
-    <button class="secundario" id="salir">Cerrar sesion</button>
-  </div>
-
-  <div class="caja oculto" id="escaneo">
-    <h2>Escanear factura</h2>
-    <input type="file" id="archivo" accept="image/*" capture="environment">
-    <button id="enviar">Procesar factura</button>
-  </div>
-
-  <div id="salida"></div>
-
-  <div class="caja oculto" id="inventario">
-    <h2>Mi inventario</h2>
-    <div id="lista-inventario">Cargando...</div>
-  </div>
-
-<script>
-const boton = document.getElementById('enviar');
-const entrada = document.getElementById('archivo');
-const salida = document.getElementById('salida');
-const acceso = document.getElementById('acceso');
-const cuenta = document.getElementById('cuenta');
-const escaneo = document.getElementById('escaneo');
-const errorAcceso = document.getElementById('error-acceso');
-
-async function autenticar(ruta) {
-  errorAcceso.textContent = '';
-  const respuesta = await fetch(ruta, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({correo: document.getElementById('correo').value,
-                          password: document.getElementById('password').value})
-  });
-  const json = await respuesta.json();
-  if (!respuesta.ok) throw new Error(json.detail || 'No fue posible autenticarte');
-  mostrarSesion(json.correo);
-}
-
-function mostrarSesion(correo) {
-  acceso.classList.add('oculto');
-  cuenta.classList.remove('oculto');
-  escaneo.classList.remove('oculto');
-  document.getElementById('inventario').classList.remove('oculto');
-  document.getElementById('usuario').textContent = correo;
-  cargarInventario();
-}
-
-async function cargarInventario() {
-  const contenedor = document.getElementById('lista-inventario');
-  try {
-    const respuesta = await fetch('/api/v1/inventario');
-    if (!respuesta.ok) { contenedor.textContent = 'No se pudo cargar el inventario'; return; }
-    const json = await respuesta.json();
-    if (!json.items.length) { contenedor.textContent = 'Aun no tienes productos guardados.'; return; }
-    contenedor.innerHTML = json.items.map(item =>
-      '<div class="item"><span class="nombre">' + item.nombre + '</span> · ' +
-      item.cantidad + ' ' + item.unidad +
-      ' <span class="crudo">(' + (item.condicion === 'nevera' ? 'nevera' : 'fuera de nevera') + ')</span></div>'
-    ).join('');
-  } catch (e) {
-    contenedor.textContent = 'Error de conexion: ' + e.message;
-  }
-}
-
-document.getElementById('iniciar').onclick = () => autenticar('/api/v1/auth/login')
-  .catch(error => errorAcceso.textContent = error.message);
-document.getElementById('registrar').onclick = () => window.location.href = '/registro';
-document.getElementById('salir').onclick = async () => {
-  await fetch('/api/v1/auth/logout', {method: 'POST'});
-  window.location.reload();
-};
-
-fetch('/api/v1/auth/me').then(respuesta => {
-  if (respuesta.ok) return respuesta.json();
-  throw new Error();
-}).then(usuario => mostrarSesion(usuario.correo)).catch(() => {});
-
-boton.onclick = async () => {
-  if (!entrada.files.length) { alert('Seleccione una foto primero'); return; }
-
-  boton.disabled = true;
-  boton.textContent = 'Procesando...';
-  salida.innerHTML = '';
-
-  const datos = new FormData();
-  datos.append('archivo', entrada.files[0]);
-
-  try {
-    const respuesta = await fetch('/api/v1/facturas/escanear', {
-      method: 'POST', body: datos
-    });
-    const json = await respuesta.json();
-
-    if (!respuesta.ok) {
-      salida.innerHTML = '<div class="caja">Error: ' + (json.detail || 'desconocido') + '</div>';
-      return;
-    }
-
-    const escaneo = await (await fetch('/api/v1/escaneos/' + json.id_escaneo)).json();
-    renderizarEscaneo(json, escaneo.lineas);
-
-  } catch (e) {
-    salida.innerHTML = '<div class="caja">Error de conexión: ' + e.message + '</div>';
-  } finally {
-    boton.disabled = false;
-    boton.textContent = 'Procesar factura';
-  }
-};
-
-function renderizarEscaneo(resumen, lineas) {
-  let html = '';
-  if (resumen.advertencia) html += '<div class="aviso">' + resumen.advertencia + '</div>';
-  html += '<div class="caja"><b>Revisa tus productos</b> · confianza OCR ' +
-          (resumen.confianza_ocr * 100).toFixed(0) + '% · ' + resumen.segundos + 's</div>';
-  html += '<div class="caja"><div id="lineas">';
-  for (const linea of lineas) {
-    const clase = linea.confianza >= 0.85 ? 'alta' : (linea.confianza >= 0.55 ? 'baja' : 'nula');
-    html += '<div class="item fila" data-linea="' + linea.id_linea + '" data-unidad="' + linea.unidad + '">' +
-      '<input class="nombre" value="' + linea.nombre.replace(/"/g, '&quot;') + '">' +
-      '<input class="cantidad" type="number" min="0.001" step="0.001" value="' + linea.cantidad + '">' +
-      '<select class="condicion"><option value="fuera" ' + (linea.condicion === 'fuera' ? 'selected' : '') + '>Fuera</option>' +
-      '<option value="nevera" ' + (linea.condicion === 'nevera' ? 'selected' : '') + '>Nevera</option></select>' +
-      '<button class="eliminar" type="button">Eliminar</button>' +
-      '<div class="crudo">Detectado: ' + linea.texto_crudo + ' · ' +
-      '<span class="conf ' + clase + '">' + (linea.confianza * 100).toFixed(0) + '%</span></div></div>';
-  }
-  html += '</div><button id="agregar" class="secundario" type="button">Agregar producto</button>' +
-          '<button id="confirmar" type="button">Confirmar productos</button><div id="mensaje"></div></div>';
-  salida.innerHTML = html;
-  const idEscaneo = resumen.id_escaneo;
-  document.querySelectorAll('.eliminar').forEach(boton => boton.onclick = async () => {
-    const fila = boton.closest('[data-linea]');
-    await fetch('/api/v1/escaneos/' + idEscaneo + '/lineas/' + fila.dataset.linea, {method: 'DELETE'});
-    fila.remove();
-  });
-  document.getElementById('agregar').onclick = async () => {
-    const respuesta = await fetch('/api/v1/escaneos/' + idEscaneo + '/lineas', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({nombre: 'Nuevo producto', cantidad: 1, unidad: 'UND', condicion: 'fuera'})
-    });
-    if (respuesta.ok) { const actualizado = await (await fetch('/api/v1/escaneos/' + idEscaneo)).json(); renderizarEscaneo(resumen, actualizado.lineas); }
-  };
-  document.getElementById('confirmar').onclick = async () => {
-    const lineasActuales = [...document.querySelectorAll('[data-linea]')].map(fila => ({
-      nombre: fila.querySelector('.nombre').value, cantidad: Number(fila.querySelector('.cantidad').value),
-      unidad: fila.dataset.unidad || 'UND', condicion: fila.querySelector('.condicion').value
-    }));
-    const respuesta = await fetch('/api/v1/escaneos/' + idEscaneo + '/confirmar', {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({lineas: lineasActuales})
-    });
-    const json = await respuesta.json().catch(() => ({}));
-    document.getElementById('mensaje').textContent = respuesta.ok
-      ? ('Se agregaron ' + (json.items_creados || lineasActuales.length) + ' productos a tu inventario')
-      : 'No se pudieron confirmar los productos';
-    if (respuesta.ok) cargarInventario();
-  };
-}
-</script>
-</body>
-</html>
-"""
