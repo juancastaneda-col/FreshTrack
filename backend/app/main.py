@@ -43,6 +43,8 @@ class Credenciales(BaseModel):
 class ItemInventario(BaseModel):
   nombre: str = Field(min_length=1, max_length=120)
   cantidad: float = Field(gt=0)
+  unidad: str = Field(default="UND", min_length=1, max_length=10)
+  condicion: str = Field(default="fuera", pattern="^(nevera|fuera)$")
 
 
 class LineaProducto(BaseModel):
@@ -106,8 +108,8 @@ def mi_cuenta(usuario=Depends(usuario_actual)):
 def listar_inventario(usuario=Depends(usuario_actual)):
   with conectar() as conexion:
     filas = conexion.execute(
-      "SELECT id_item, nombre, cantidad, situacion FROM item_inventario "
-      "WHERE id_usuario = ? ORDER BY id_item",
+      "SELECT id_item, nombre, cantidad, unidad, condicion, situacion FROM item_inventario "
+      "WHERE id_usuario = ? AND situacion = 'activo' ORDER BY id_item DESC",
       (usuario["id_usuario"],),
     ).fetchall()
   return {"items": [dict(fila) for fila in filas]}
@@ -117,9 +119,11 @@ def listar_inventario(usuario=Depends(usuario_actual)):
 def agregar_inventario(item: ItemInventario, usuario=Depends(usuario_actual)):
   with conectar() as conexion:
     fila = conexion.execute(
-      "INSERT INTO item_inventario (id_usuario, nombre, cantidad) VALUES (?, ?, ?) "
-      "RETURNING id_item, nombre, cantidad, situacion",
-      (usuario["id_usuario"], item.nombre.strip(), item.cantidad),
+      "INSERT INTO item_inventario (id_usuario, nombre, cantidad, unidad, condicion) "
+      "VALUES (?, ?, ?, ?, ?) "
+      "RETURNING id_item, nombre, cantidad, unidad, condicion, situacion",
+      (usuario["id_usuario"], item.nombre.strip(), item.cantidad,
+       item.unidad.upper(), item.condicion),
     ).fetchone()
   return dict(fila)
 
@@ -207,17 +211,55 @@ def confirmar_escaneo(id_escaneo: int, datos: ConfirmacionEscaneo,
   with conectar() as conexion:
     _obtener_escaneo(conexion, id_escaneo, usuario["id_usuario"])
     existentes = conexion.execute(
-      "SELECT id_linea FROM linea_detectada WHERE id_escaneo = ? ORDER BY id_linea", (id_escaneo,)
+      "SELECT id_linea, texto_crudo FROM linea_detectada WHERE id_escaneo = ? ORDER BY id_linea",
+      (id_escaneo,),
     ).fetchall()
     if len(existentes) != len(datos.lineas):
       raise HTTPException(status_code=400, detail="La lista de confirmacion no coincide con el escaneo")
+    items_creados = 0
     for fila, linea in zip(existentes, datos.lineas):
+      nombre = linea.nombre.strip()
+      unidad = linea.unidad.upper()
       conexion.execute(
         "UPDATE linea_detectada SET nombre = ?, cantidad = ?, unidad = ?, condicion = ?, confirmada = 1 "
         "WHERE id_linea = ?",
-        (linea.nombre.strip(), linea.cantidad, linea.unidad.upper(), linea.condicion, fila["id_linea"]),
+        (nombre, linea.cantidad, unidad, linea.condicion, fila["id_linea"]),
       )
-  return {"mensaje": "Productos confirmados", "id_escaneo": id_escaneo, "total": len(datos.lineas)}
+      conexion.execute(
+        "INSERT INTO item_inventario (id_usuario, nombre, cantidad, unidad, condicion, id_escaneo) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (usuario["id_usuario"], nombre, linea.cantidad, unidad, linea.condicion, id_escaneo),
+      )
+      items_creados += 1
+      _guardar_correccion(conexion, usuario["id_usuario"], fila["texto_crudo"], nombre)
+  return {"mensaje": "Productos confirmados", "id_escaneo": id_escaneo,
+          "total": len(datos.lineas), "items_creados": items_creados}
+
+
+def _cargar_correcciones(conexion, id_usuario):
+  """Devuelve {texto_crudo: nombre_corregido} para aplicar a nuevos escaneos."""
+  filas = conexion.execute(
+    "SELECT texto_crudo, nombre_corregido FROM correccion_alias WHERE id_usuario = ?",
+    (id_usuario,),
+  ).fetchall()
+  return {fila["texto_crudo"]: fila["nombre_corregido"] for fila in filas}
+
+
+def _guardar_correccion(conexion, id_usuario, texto_crudo, nombre_final):
+  """Aprende que este texto de factura corresponde a este producto para el usuario."""
+  texto = (texto_crudo or "").strip()
+  nombre = (nombre_final or "").strip()
+  if not texto or not nombre:
+    return
+  conexion.execute(
+    """INSERT INTO correccion_alias (id_usuario, texto_crudo, nombre_corregido)
+       VALUES (?, ?, ?)
+       ON CONFLICT(id_usuario, texto_crudo) DO UPDATE SET
+         nombre_corregido = excluded.nombre_corregido,
+         veces = correccion_alias.veces + 1,
+         actualizado_en = CURRENT_TIMESTAMP""",
+    (id_usuario, texto, nombre),
+  )
 
 
 def _leer_imagen(contenido):
@@ -267,12 +309,18 @@ async def escanear_factura(archivo: UploadFile = File(...), usuario=Depends(usua
         advertencia = "No se detectaron productos en la factura."
 
     with conectar() as conexion:
+      correcciones = _cargar_correcciones(conexion, usuario["id_usuario"])
       escaneo = conexion.execute(
         "INSERT INTO escaneo_borrador (id_usuario, texto_ocr) VALUES (?, ?) RETURNING id_escaneo",
         (usuario["id_usuario"], resultado_ocr["texto"]),
       ).fetchone()
       id_escaneo = escaneo["id_escaneo"]
       for producto in productos:
+        aprendida = correcciones.get((producto["texto_crudo"] or "").strip())
+        if aprendida:
+          producto["nombre_sugerido"] = aprendida
+          producto["confianza"] = max(producto["confianza"], 0.95)
+          producto["confirmado"] = True
         conexion.execute(
           """INSERT INTO linea_detectada
              (id_escaneo, texto_crudo, id_alimento_sugerido, nombre, cantidad, unidad, confianza)
@@ -377,6 +425,11 @@ def pagina_prueba():
 
   <div id="salida"></div>
 
+  <div class="caja oculto" id="inventario">
+    <h2>Mi inventario</h2>
+    <div id="lista-inventario">Cargando...</div>
+  </div>
+
 <script>
 const boton = document.getElementById('enviar');
 const entrada = document.getElementById('archivo');
@@ -402,7 +455,26 @@ function mostrarSesion(correo) {
   acceso.classList.add('oculto');
   cuenta.classList.remove('oculto');
   escaneo.classList.remove('oculto');
+  document.getElementById('inventario').classList.remove('oculto');
   document.getElementById('usuario').textContent = correo;
+  cargarInventario();
+}
+
+async function cargarInventario() {
+  const contenedor = document.getElementById('lista-inventario');
+  try {
+    const respuesta = await fetch('/api/v1/inventario');
+    if (!respuesta.ok) { contenedor.textContent = 'No se pudo cargar el inventario'; return; }
+    const json = await respuesta.json();
+    if (!json.items.length) { contenedor.textContent = 'Aun no tienes productos guardados.'; return; }
+    contenedor.innerHTML = json.items.map(item =>
+      '<div class="item"><span class="nombre">' + item.nombre + '</span> · ' +
+      item.cantidad + ' ' + item.unidad +
+      ' <span class="crudo">(' + (item.condicion === 'nevera' ? 'nevera' : 'fuera de nevera') + ')</span></div>'
+    ).join('');
+  } catch (e) {
+    contenedor.textContent = 'Error de conexion: ' + e.message;
+  }
 }
 
 document.getElementById('iniciar').onclick = () => autenticar('/api/v1/auth/login')
@@ -492,7 +564,11 @@ function renderizarEscaneo(resumen, lineas) {
     const respuesta = await fetch('/api/v1/escaneos/' + idEscaneo + '/confirmar', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({lineas: lineasActuales})
     });
-    document.getElementById('mensaje').textContent = respuesta.ok ? 'Productos confirmados' : 'No se pudieron confirmar los productos';
+    const json = await respuesta.json().catch(() => ({}));
+    document.getElementById('mensaje').textContent = respuesta.ok
+      ? ('Se agregaron ' + (json.items_creados || lineasActuales.length) + ' productos a tu inventario')
+      : 'No se pudieron confirmar los productos';
+    if (respuesta.ok) cargarInventario();
   };
 }
 </script>
