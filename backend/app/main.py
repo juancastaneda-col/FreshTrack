@@ -52,7 +52,12 @@ class ItemInventario(BaseModel):
   condicion: str = Field(default="fuera", pattern="^(nevera|fuera)$")
 
 
+class CambioSituacion(BaseModel):
+  situacion: str = Field(pattern="^(consumido|desechado)$")
+
+
 class LineaProducto(BaseModel):
+  id_alimento: int | None = None
   nombre: str = Field(min_length=1, max_length=120)
   cantidad: float = Field(gt=0)
   unidad: str = Field(default="UND", min_length=1, max_length=10)
@@ -113,8 +118,10 @@ def mi_cuenta(usuario=Depends(usuario_actual)):
 def listar_inventario(usuario=Depends(usuario_actual)):
   with conectar() as conexion:
     filas = conexion.execute(
-      "SELECT id_item, nombre, cantidad, unidad, condicion, situacion FROM item_inventario "
-      "WHERE id_usuario = ? AND situacion = 'activo' ORDER BY id_item DESC",
+      "SELECT id_item, id_alimento, nombre, cantidad, unidad, condicion, situacion, "
+      "fecha_vencimiento_est FROM item_inventario "
+      "WHERE id_usuario = ? AND situacion = 'activo' "
+      "ORDER BY fecha_vencimiento_est IS NULL, fecha_vencimiento_est, id_item DESC",
       (usuario["id_usuario"],),
     ).fetchall()
   return {"items": [dict(fila) for fila in filas]}
@@ -155,6 +162,24 @@ def agregar_inventario(item: ItemInventario, usuario=Depends(usuario_actual)):
   if aviso:
     resultado["aviso"] = aviso
   return resultado
+
+
+@app.patch("/api/v1/inventario/{id_item}")
+def cambiar_situacion(id_item: int, cambio: CambioSituacion,
+                      usuario=Depends(usuario_actual)):
+  with conectar() as conexion:
+    cursor = conexion.execute(
+      "UPDATE item_inventario SET situacion = ?, fecha_cierre = CURRENT_DATE "
+      "WHERE id_item = ? AND id_usuario = ? AND situacion = 'activo'",
+      (cambio.situacion, id_item, usuario["id_usuario"]),
+    )
+    if cursor.rowcount == 0:
+      raise HTTPException(status_code=404, detail="Producto no encontrado o ya cerrado")
+    fila = conexion.execute(
+      "SELECT id_item, nombre, cantidad, unidad, condicion, situacion, fecha_vencimiento_est "
+      "FROM item_inventario WHERE id_item = ?", (id_item,)
+    ).fetchone()
+  return dict(fila)
 
 
 def _linea_dict(fila):
@@ -241,7 +266,8 @@ def confirmar_escaneo(id_escaneo: int, datos: ConfirmacionEscaneo,
   with conectar() as conexion:
     _obtener_escaneo(conexion, id_escaneo, usuario["id_usuario"])
     existentes = conexion.execute(
-      "SELECT id_linea, texto_crudo FROM linea_detectada WHERE id_escaneo = ? ORDER BY id_linea",
+      "SELECT id_linea, texto_crudo, id_alimento_sugerido FROM linea_detectada "
+      "WHERE id_escaneo = ? ORDER BY id_linea",
       (id_escaneo,),
     ).fetchall()
     if len(existentes) != len(datos.lineas):
@@ -250,15 +276,22 @@ def confirmar_escaneo(id_escaneo: int, datos: ConfirmacionEscaneo,
     for fila, linea in zip(existentes, datos.lineas):
       nombre = linea.nombre.strip()
       unidad = linea.unidad.upper()
+      id_alimento = linea.id_alimento or fila["id_alimento_sugerido"]
+      if id_alimento is not None and catalogo.obtener(id_alimento) is None:
+        raise HTTPException(status_code=404, detail="El alimento no esta en el catalogo")
+      vencimiento = (catalogo.calcular_vencimiento(id_alimento, linea.condicion, date.today())
+                     if id_alimento is not None else None)
       conexion.execute(
         "UPDATE linea_detectada SET nombre = ?, cantidad = ?, unidad = ?, condicion = ?, confirmada = 1 "
         "WHERE id_linea = ?",
         (nombre, linea.cantidad, unidad, linea.condicion, fila["id_linea"]),
       )
       conexion.execute(
-        "INSERT INTO item_inventario (id_usuario, nombre, cantidad, unidad, condicion, id_escaneo) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (usuario["id_usuario"], nombre, linea.cantidad, unidad, linea.condicion, id_escaneo),
+        "INSERT INTO item_inventario "
+        "(id_usuario, id_alimento, nombre, cantidad, unidad, condicion, "
+        "fecha_vencimiento_est, id_escaneo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (usuario["id_usuario"], id_alimento, nombre, linea.cantidad, unidad,
+         linea.condicion, vencimiento.isoformat() if vencimiento else None, id_escaneo),
       )
       items_creados += 1
       _guardar_correccion(conexion, usuario["id_usuario"], fila["texto_crudo"], nombre)

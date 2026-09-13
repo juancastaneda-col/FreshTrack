@@ -45,7 +45,8 @@ def inicializar(conexion):
             condicion TEXT NOT NULL DEFAULT 'fuera' CHECK (condicion IN ('nevera','fuera')),
             situacion TEXT NOT NULL DEFAULT 'activo',
             id_escaneo INTEGER REFERENCES escaneo_borrador(id_escaneo) ON DELETE SET NULL,
-            creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            fecha_cierre TEXT
         );
         CREATE TABLE IF NOT EXISTS escaneo_borrador (
             id_escaneo INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,6 +99,8 @@ def _migrar_columnas(conexion):
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN id_alimento INTEGER")
     if "fecha_vencimiento_est" not in columnas:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN fecha_vencimiento_est TEXT")
+    if "fecha_cierre" not in columnas:
+        conexion.execute("ALTER TABLE item_inventario ADD COLUMN fecha_cierre TEXT")
 
 
 def crear_sesion(conexion, id_usuario, expira_en):

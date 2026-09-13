@@ -82,6 +82,96 @@ botonCrear.onclick = async () => {
 """
 
 
+@router.get("/inventario", response_class=HTMLResponse)
+def pagina_inventario():
+  """Pagina independiente para consultar y actualizar el inventario."""
+  return """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FreshTrack — Mi inventario</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px;
+           background: #f5f6f8; color: #1a1a1a; }
+    main { max-width: 640px; margin: 0 auto; }
+    .caja { background: #fff; border-radius: 12px; padding: 16px;
+            margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .barra { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .barra h1 { font-size: 20px; margin: 0; }
+    .item { border-bottom: 1px solid #eee; padding: 14px 0; }
+    .item:last-child { border-bottom: 0; }
+    .nombre { font-weight: 600; }
+    .detalle { color: #777; font-size: 13px; }
+    .vencimiento { color: #8a3b12; font-size: 13px; margin-top: 4px; }
+    .acciones { display: flex; gap: 8px; margin-top: 12px; }
+    button, .enlace { box-sizing: border-box; border: 0; border-radius: 10px;
+             padding: 12px; font-size: 14px; text-align: center; }
+    button { flex: 1; background: #1a4fd6; color: #fff; }
+    button:disabled { background: #9aa5b8; }
+    .secundario { background: #e5e9f2; color: #1a1a1a; }
+    .enlace { display: inline-block; text-decoration: none; }
+    .error { color: #b3261e; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="caja">
+    <div class="barra"><h1>Mi inventario</h1><a class="enlace secundario" href="/">Escanear factura</a></div>
+    <div id="usuario" class="detalle"></div>
+  </div>
+  <div class="caja" id="contenido">Cargando inventario...</div>
+</main>
+<script>
+const contenido = document.getElementById('contenido');
+
+async function cargarInventario() {
+  try {
+    const respuesta = await fetch('/api/v1/inventario');
+    if (respuesta.status === 401) { window.location.href = '/'; return; }
+    if (!respuesta.ok) throw new Error('No se pudo cargar el inventario');
+    const json = await respuesta.json();
+    if (!json.items.length) {
+      contenido.textContent = 'Aun no tienes productos guardados.';
+      return;
+    }
+    contenido.innerHTML = json.items.map(item =>
+      '<div class="item"><span class="nombre">' + item.nombre + '</span> &middot; ' +
+      item.cantidad + ' ' + item.unidad +
+      ' <span class="detalle">(' + (item.condicion === 'nevera' ? 'nevera' : 'fuera de nevera') + ')</span>' +
+      '<div class="vencimiento">Vence: ' + (item.fecha_vencimiento_est || 'sin estimacion') + '</div>' +
+      '<div class="acciones"><button data-situacion="consumido" data-id="' + item.id_item + '">Consumido</button>' +
+      '<button class="secundario" data-situacion="desechado" data-id="' + item.id_item + '">Desechado</button></div></div>'
+    ).join('');
+    contenido.querySelectorAll('[data-situacion]').forEach(boton => boton.onclick = async () => {
+      boton.disabled = true;
+      const respuesta = await fetch('/api/v1/inventario/' + boton.dataset.id, {
+        method: 'PATCH', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({situacion: boton.dataset.situacion})
+      });
+      if (respuesta.ok) cargarInventario();
+      else boton.disabled = false;
+    });
+  } catch (error) {
+    contenido.innerHTML = '<span class="error">' + error.message + '</span>';
+  }
+}
+
+fetch('/api/v1/auth/me').then(respuesta => {
+  if (!respuesta.ok) { window.location.href = '/'; return; }
+  return respuesta.json();
+}).then(usuario => {
+  if (!usuario) return;
+  document.getElementById('usuario').textContent = usuario.correo;
+  cargarInventario();
+});
+</script>
+</body>
+</html>
+"""
+
+
 @router.get("/", response_class=HTMLResponse)
 def pagina_prueba():
     """Pagina minima para probar el escaneo desde el celular."""
@@ -105,6 +195,7 @@ def pagina_prueba():
     .item { border-bottom: 1px solid #eee; padding: 10px 0; }
     .item:last-child { border-bottom: 0; }
     .nombre { font-weight: 600; }
+    .vencimiento { font-size: 13px; color: #8a3b12; }
     .crudo { color: #777; font-size: 12px; }
     .conf { font-size: 12px; }
     .alta { color: #1a7f37; } .baja { color: #b35c00; } .nula { color: #b3261e; }
@@ -148,6 +239,7 @@ def pagina_prueba():
 
   <div class="caja oculto" id="cuenta">
     <b id="usuario"></b>
+    <button class="secundario" id="ver-inventario" type="button">Ver mi inventario</button>
     <button class="secundario" id="salir">Cerrar sesion</button>
   </div>
 
@@ -187,11 +279,6 @@ def pagina_prueba():
 
   <div id="salida"></div>
 
-  <div class="caja oculto" id="inventario">
-    <h2>Mi inventario</h2>
-    <div id="lista-inventario">Cargando...</div>
-  </div>
-
 <script>
 const boton = document.getElementById('enviar');
 const entrada = document.getElementById('archivo');
@@ -218,26 +305,7 @@ function mostrarSesion(correo) {
   cuenta.classList.remove('oculto');
   escaneo.classList.remove('oculto');
   document.getElementById('agregar-manual').classList.remove('oculto');
-  document.getElementById('inventario').classList.remove('oculto');
   document.getElementById('usuario').textContent = correo;
-  cargarInventario();
-}
-
-async function cargarInventario() {
-  const contenedor = document.getElementById('lista-inventario');
-  try {
-    const respuesta = await fetch('/api/v1/inventario');
-    if (!respuesta.ok) { contenedor.textContent = 'No se pudo cargar el inventario'; return; }
-    const json = await respuesta.json();
-    if (!json.items.length) { contenedor.textContent = 'Aun no tienes productos guardados.'; return; }
-    contenedor.innerHTML = json.items.map(item =>
-      '<div class="item"><span class="nombre">' + item.nombre + '</span> &middot; ' +
-      item.cantidad + ' ' + item.unidad +
-      ' <span class="crudo">(' + (item.condicion === 'nevera' ? 'nevera' : 'fuera de nevera') + ')</span></div>'
-    ).join('');
-  } catch (e) {
-    contenedor.textContent = 'Error de conexion: ' + e.message;
-  }
 }
 
 const buscador = document.getElementById('buscar-catalogo');
@@ -319,12 +387,12 @@ document.getElementById('guardar-manual').onclick = async () => {
   mensajeManual.textContent = msg;
   formularioManual.classList.add('oculto');
   alimentoSeleccionado = null;
-  cargarInventario();
 };
 
 document.getElementById('iniciar').onclick = () => autenticar('/api/v1/auth/login')
   .catch(error => errorAcceso.textContent = error.message);
 document.getElementById('registrar').onclick = () => window.location.href = '/registro';
+document.getElementById('ver-inventario').onclick = () => window.location.href = '/inventario';
 document.getElementById('salir').onclick = async () => {
   await fetch('/api/v1/auth/logout', {method: 'POST'});
   window.location.reload();
@@ -377,7 +445,7 @@ function renderizarEscaneo(resumen, lineas) {
     const clase = linea.confianza >= 0.85 ? 'alta' : (linea.confianza >= 0.55 ? 'baja' : 'nula');
     const fueraCatalogo = linea.en_catalogo === false;
     const claseItem = fueraCatalogo ? 'item fila excluido' : 'item fila';
-    html += '<div class="' + claseItem + '" data-linea="' + linea.id_linea + '" data-unidad="' + linea.unidad + '" data-catalogo="' + (linea.en_catalogo ? '1' : '0') + '">' +
+    html += '<div class="' + claseItem + '" data-linea="' + linea.id_linea + '" data-id-alimento="' + (linea.id_alimento_sugerido || '') + '" data-unidad="' + linea.unidad + '" data-catalogo="' + (linea.en_catalogo ? '1' : '0') + '">' +
       '<input class="nombre" value="' + linea.nombre.replace(/"/g, '&quot;') + '">' +
       '<input class="cantidad" type="number" min="0.001" step="0.001" value="' + linea.cantidad + '">' +
       '<select class="condicion"><option value="fuera" ' + (linea.condicion === 'fuera' ? 'selected' : '') + '>Fuera</option>' +
@@ -418,6 +486,7 @@ function renderizarEscaneo(resumen, lineas) {
       fila.remove();
     }
     const lineasActuales = [...document.querySelectorAll('[data-linea]')].map(fila => ({
+      id_alimento: fila.dataset.idAlimento ? Number(fila.dataset.idAlimento) : null,
       nombre: fila.querySelector('.nombre').value, cantidad: Number(fila.querySelector('.cantidad').value),
       unidad: fila.dataset.unidad || 'UND', condicion: fila.querySelector('.condicion').value
     }));
@@ -432,7 +501,6 @@ function renderizarEscaneo(resumen, lineas) {
     document.getElementById('mensaje').textContent = respuesta.ok
       ? ('Se agregaron ' + (json.items_creados || lineasActuales.length) + ' productos a tu inventario')
       : 'No se pudieron confirmar los productos';
-    if (respuesta.ok) cargarInventario();
   };
 }
 </script>
