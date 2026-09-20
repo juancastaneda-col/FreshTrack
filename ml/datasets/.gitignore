@@ -1,0 +1,8 @@
+# Los datasets se descargan/generan localmente al correr los scripts.
+# No van al repo (pesan varios GB) — cualquiera los regenera con:
+#   python ml/scripts/descargar.py
+#   python ml/scripts/unificar.py
+#   python ml/scripts/preparar.py
+raw/
+unified/
+splits/

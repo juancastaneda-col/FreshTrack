@@ -1,0 +1,3 @@
+huggingface-hub>=0.24
+datasets>=2.14
+pillow>=11

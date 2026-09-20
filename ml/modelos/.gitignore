@@ -1,0 +1,5 @@
+# Modelos entrenados y reportes: se generan al correr scripts/entrenar.py
+# y scripts/evaluar.py, no van al repo (pesan y se regeneran).
+*
+!.gitignore
+!README.md

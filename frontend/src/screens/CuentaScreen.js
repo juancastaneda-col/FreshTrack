@@ -4,7 +4,7 @@ import { Text, TextInput, Button, ActivityIndicator, Divider } from 'react-nativ
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { api } from '../services/api';
 
-export default function DetalleProductoScreen() {
+export default function CuentaScreen() {
   const navigation = useNavigation();
   const [cargando, setCargando] = useState(true);
   const [correo, setCorreo] = useState('');

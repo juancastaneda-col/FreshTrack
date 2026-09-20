@@ -14,7 +14,7 @@ function calcularEstado(fechaVencimiento) {
   return { color: '#2E7D32', label: `Vence en ${dias}d` };
 }
 
-export default function CatalogoScreen() {
+export default function InventarioScreen() {
   const [items, setItems] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);

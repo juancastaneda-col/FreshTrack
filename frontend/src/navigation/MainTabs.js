@@ -1,9 +1,9 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import CatalogoScreen from '../screens/CatalogoScreen';
+import InventarioScreen from '../screens/InventarioScreen';
 import EscanearScreen from '../screens/EscanearScreen';
-import DetalleProductoScreen from '../screens/DetalleProductoScreen';
+import CuentaScreen from '../screens/CuentaScreen';
 import AgregarProductoScreen from '../screens/AgregarProductoScreen';
 
 const Tab = createBottomTabNavigator();
@@ -12,8 +12,8 @@ export default function MainTabs() {
   return (
     <Tab.Navigator screenOptions={{ headerShown: true }}>
       <Tab.Screen
-        name="Catálogo"
-        component={CatalogoScreen}
+        name="Inventario"
+        component={InventarioScreen}
         options={{ tabBarIcon: ({ color, size }) => (
           <MaterialCommunityIcons name="fridge-outline" color={color} size={size} />
         )}}
@@ -33,10 +33,10 @@ export default function MainTabs() {
         )}}
       />
       <Tab.Screen
-        name="Detalle"
-        component={DetalleProductoScreen}
+        name="Cuenta"
+        component={CuentaScreen}
         options={{ tabBarIcon: ({ color, size }) => (
-          <MaterialCommunityIcons name="food-apple-outline" color={color} size={size} />
+          <MaterialCommunityIcons name="account-circle-outline" color={color} size={size} />
         )}}
       />
     </Tab.Navigator>

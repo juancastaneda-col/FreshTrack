@@ -20,7 +20,6 @@ from .catalogo import CATALOGO_ALIAS
 from .matching import asociar_catalogo
 from .ocr import extraer_texto
 from .parser_factura import parsear_factura
-from .prototipo import router as prototipo_router
 from .auth import fecha_expiracion, hash_password, usuario_actual, validar_correo, verificar_password
 from .storage import conectar, crear_sesion
 
@@ -37,8 +36,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.include_router(prototipo_router)
 
 TAMANO_MAXIMO = 10 * 1024 * 1024          # 10 MB
 FORMATOS_VALIDOS = {"image/jpeg", "image/png", "image/webp"}

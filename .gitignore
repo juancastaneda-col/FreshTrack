@@ -31,11 +31,27 @@ backend/cookies.txt
 *.tflite
 *.h5
 *.pb
+*.keras
+
+# Datasets de vision artificial (miles de imagenes; van fuera del repo)
+ml/datasets/raw/
+ml/datasets/unified/
+ml/datasets/splits/
 
 # Editores
 .vscode/
 .idea/
 *.swp
+
+# Claude Code (configuración local del asistente)
+.claude/
+
+# Logs locales
+*.log
+
+# Expo / Metro (build local del frontend)
+.expo/
+.expo-shared/
 
 # Sistema operativo
 .DS_Store

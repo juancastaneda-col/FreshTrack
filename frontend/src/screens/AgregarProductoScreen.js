@@ -1,8 +1,18 @@
 import { useState, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { Text, TextInput, Button, List, SegmentedButtons, ActivityIndicator } from 'react-native-paper';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../services/api';
+
+function mensajeDeError(error, fallback) {
+  if (!error.response) {
+    return 'No se pudo conectar con el servidor. Verifica que el backend esté corriendo.';
+  }
+  const detalle = error.response.data?.detail;
+  if (Array.isArray(detalle)) return detalle.map((d) => d.msg).join(' · ');
+  if (typeof detalle === 'string') return detalle;
+  return fallback || `Error ${error.response.status}.`;
+}
 
 const UNIDADES = [
   { value: 'UND', label: 'Unidad' },
@@ -23,6 +33,8 @@ export default function AgregarProductoScreen() {
   const [unidad, setUnidad] = useState('UND');
   const [condicion, setCondicion] = useState('fuera');
   const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState(null);
+  const [exito, setExito] = useState(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -63,10 +75,12 @@ export default function AgregarProductoScreen() {
   };
 
   const guardarProducto = async () => {
+    setError(null);
+    setExito(null);
     if (!seleccionado) return;
     const cantidadNum = parseFloat(cantidad);
     if (!cantidadNum || cantidadNum <= 0) {
-      Alert.alert('Cantidad inválida', 'Ingresa una cantidad mayor a 0.');
+      setError('Ingresa una cantidad mayor a 0.');
       return;
     }
     setGuardando(true);
@@ -80,18 +94,17 @@ export default function AgregarProductoScreen() {
       });
 
       let mensaje = 'Producto agregado a tu inventario.';
-      if (data.fecha_vencimiento_est) mensaje += `\nVence el ${data.fecha_vencimiento_est}.`;
-      if (data.aviso) mensaje += `\n\n⚠️ ${data.aviso}`;
+      if (data.fecha_vencimiento_est) mensaje += ` Vence el ${data.fecha_vencimiento_est}.`;
+      if (data.aviso) mensaje += ` Aviso: ${data.aviso}`;
 
-      Alert.alert('¡Listo!', mensaje);
-      // reinicia el formulario
+      setExito(mensaje);
       setSeleccionado(null);
       setBusqueda('');
       setCantidad('1');
       setUnidad('UND');
       setCondicion('fuera');
-    } catch (error) {
-      Alert.alert('Error', error.response?.data?.detail || 'No se pudo agregar el producto.');
+    } catch (err) {
+      setError(mensajeDeError(err, 'No se pudo agregar el producto.'));
     } finally {
       setGuardando(false);
     }
@@ -101,6 +114,9 @@ export default function AgregarProductoScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text variant="headlineMedium" style={styles.title}>Agregar producto</Text>
       <Text style={styles.subtitle}>Regístralo a mano si no tienes la factura.</Text>
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {exito ? <Text style={styles.exito}>{exito}</Text> : null}
 
       <TextInput
         mode="outlined"
@@ -219,4 +235,6 @@ const styles = StyleSheet.create({
   etiqueta: { fontSize: 13, color: '#666', marginTop: 12, marginBottom: 6 },
   segmented: { marginBottom: 8 },
   guardarBoton: { marginTop: 16, marginBottom: 4 },
+  error: { color: '#b3261e', backgroundColor: '#fdecea', padding: 10, borderRadius: 8, marginBottom: 12, textAlign: 'center' },
+  exito: { color: '#1B5E20', backgroundColor: '#E8F5E9', padding: 10, borderRadius: 8, marginBottom: 12, textAlign: 'center' },
 });
