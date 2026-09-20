@@ -12,6 +12,7 @@ from datetime import date
 import cv2
 import numpy as np
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from . import catalogo
@@ -29,6 +30,14 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"http://localhost:\d+",  # permite cualquier puerto local (Expo web)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(prototipo_router)
 
 TAMANO_MAXIMO = 10 * 1024 * 1024          # 10 MB
@@ -43,6 +52,10 @@ class Credenciales(BaseModel):
   correo: str
   password: str = Field(min_length=8, max_length=128)
 
+class ActualizacionCuenta(BaseModel):
+  nombre: str | None = Field(default=None, min_length=1, max_length=120)
+  password_actual: str | None = None
+  nueva_password: str | None = Field(default=None, min_length=8, max_length=128)
 
 class ItemInventario(BaseModel):
   id_alimento: int | None = None
@@ -113,6 +126,31 @@ def cerrar_sesion(response: Response, token_sesion: str | None = Cookie(default=
 def mi_cuenta(usuario=Depends(usuario_actual)):
   return dict(usuario)
 
+@app.patch("/api/v1/auth/me")
+def actualizar_cuenta(datos: ActualizacionCuenta, usuario=Depends(usuario_actual)):
+  with conectar() as conexion:
+    if datos.nueva_password:
+      if not datos.password_actual:
+        raise HTTPException(status_code=422, detail="Debe ingresar su contrasena actual")
+      fila = conexion.execute(
+        "SELECT hash_password FROM usuario WHERE id_usuario = ?", (usuario["id_usuario"],)
+      ).fetchone()
+      if not verificar_password(datos.password_actual, fila["hash_password"]):
+        raise HTTPException(status_code=401, detail="La contrasena actual no es correcta")
+      conexion.execute(
+        "UPDATE usuario SET hash_password = ? WHERE id_usuario = ?",
+        (hash_password(datos.nueva_password), usuario["id_usuario"]),
+      )
+    if datos.nombre:
+      conexion.execute(
+        "UPDATE usuario SET nombre = ? WHERE id_usuario = ?",
+        (datos.nombre.strip(), usuario["id_usuario"]),
+      )
+    fila = conexion.execute(
+      "SELECT id_usuario, correo, nombre FROM usuario WHERE id_usuario = ?",
+      (usuario["id_usuario"],),
+    ).fetchone()
+  return dict(fila)
 
 @app.get("/api/v1/inventario")
 def listar_inventario(usuario=Depends(usuario_actual)):

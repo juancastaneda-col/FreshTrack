@@ -15,7 +15,8 @@ from pytesseract import Output
 
 from .preprocesamiento import preparar_variantes
 
-
+import pytesseract
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR"
 # --psm 6 = "asumir un bloque uniforme de texto".
 # Es el modo que mejor funciona con facturas, porque son una columna
 # de líneas. El modo automático tiende a confundirse con los logos.
