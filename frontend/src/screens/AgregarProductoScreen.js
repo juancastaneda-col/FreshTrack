@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { Text, TextInput, Button, List, SegmentedButtons, ActivityIndicator } from 'react-native-paper';
 import { useFocusEffect } from '@react-navigation/native';
@@ -22,7 +22,7 @@ const UNIDADES = [
   { value: 'MANOJO', label: 'Manojo' },
 ];
 
-export default function AgregarProductoScreen() {
+export default function AgregarProductoScreen({ route }) {
   const [busqueda, setBusqueda] = useState('');
   const [resultados, setResultados] = useState([]);
   const [buscando, setBuscando] = useState(false);
@@ -109,6 +109,11 @@ export default function AgregarProductoScreen() {
       setGuardando(false);
     }
   };
+
+  useEffect(() => {
+    const nombre = route?.params?.nombre?.trim();
+    if (nombre) buscarEnCatalogo(nombre);
+  }, [route?.params?.nombre]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>

@@ -5,3 +5,4 @@ pytesseract==0.3.*
 opencv-python-headless==4.*
 numpy==2.*
 pillow==11.*
+tensorflow-cpu==2.20.*

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { View, StyleSheet, Alert, Platform, ScrollView } from 'react-native';
-import { Text, TextInput, Button, ActivityIndicator, Divider } from 'react-native-paper';
+import { Text, TextInput, Button, ActivityIndicator, Divider, List } from 'react-native-paper';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { api } from '../services/api';
 
@@ -17,11 +17,14 @@ export default function CuentaScreen() {
   const [cambiandoPassword, setCambiandoPassword] = useState(false);
 
   const [cerrando, setCerrando] = useState(false);
+  const [historial, setHistorial] = useState([]);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS === 'web') document.title = 'Mi cuenta · FreshTrack';
       cargarCuenta();
+      cargarHistorial();
     }, [])
   );
 
@@ -35,6 +38,18 @@ export default function CuentaScreen() {
       // si falla, se queda vacío
     } finally {
       setCargando(false);
+    }
+  };
+
+  const cargarHistorial = async () => {
+    setCargandoHistorial(true);
+    try {
+      const { data } = await api.get('/api/v1/camara/historial');
+      setHistorial(data.identificaciones || []);
+    } catch (error) {
+      setHistorial([]);
+    } finally {
+      setCargandoHistorial(false);
     }
   };
 
@@ -122,6 +137,24 @@ export default function CuentaScreen() {
       <Divider style={{ marginVertical: 20 }} />
 
       <View style={styles.card}>
+        <Text variant="titleMedium" style={{ marginBottom: 8 }}>Historial de identificaciones</Text>
+        {cargandoHistorial ? <ActivityIndicator /> : null}
+        {!cargandoHistorial && historial.length === 0 ? (
+          <Text style={styles.historialVacio}>Todavía no has identificado alimentos.</Text>
+        ) : null}
+        {historial.map((identificacion) => (
+          <List.Item
+            key={identificacion.id_identificacion}
+            title={identificacion.nombre || 'Alimento no reconocido'}
+            description={`${identificacion.estado || 'Sin estado'} · ${Math.round(identificacion.confianza * 100)}% · ${new Date(identificacion.creado_en).toLocaleString()}`}
+            left={(props) => <List.Icon {...props} icon={identificacion.reconocido ? 'food-apple-outline' : 'help-circle-outline'} />}
+          />
+        ))}
+      </View>
+
+      <Divider style={{ marginVertical: 20 }} />
+
+      <View style={styles.card}>
         <Text variant="titleMedium" style={{ marginBottom: 12 }}>Cambiar contraseña</Text>
         <TextInput
           mode="outlined"
@@ -174,5 +207,6 @@ const styles = StyleSheet.create({
   input: { marginTop: 8, marginBottom: 4, backgroundColor: '#FFF' },
   filaValor: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   filaBotones: { flexDirection: 'row', marginTop: 8 },
+  historialVacio: { color: '#666', marginVertical: 8 },
   cerrarBoton: { marginTop: 24 },
 });
