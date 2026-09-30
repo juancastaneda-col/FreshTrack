@@ -6,8 +6,7 @@ __pycache__/
 venv/
 env/
 
-# Entorno y cre
-
+# Entorno y credenciales
 .env
 *.env
 config.local.*
