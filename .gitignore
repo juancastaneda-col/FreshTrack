@@ -43,8 +43,7 @@ ml/datasets/splits/
 .idea/
 *.swp
 
-# Claude Code (configuración local del asistente)
-.claude/
+
 
 # Logs locales
 *.log

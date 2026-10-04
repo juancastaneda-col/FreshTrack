@@ -15,7 +15,8 @@ function mensajeDeError(error, fallback) {
   return fallback || `Error ${error.response.status}.`;
 }
 
-export default function EscanearScreen() {
+export default function EscanearScreen({ navigation }) {
+  const [modo, setModo] = useState('factura');
   const [imagen, setImagen] = useState(null);
   const [procesando, setProcesando] = useState(false);
   const [idEscaneo, setIdEscaneo] = useState(null);
@@ -24,6 +25,8 @@ export default function EscanearScreen() {
   const [aviso, setAviso] = useState(null);
   const [error, setError] = useState(null);
   const [exito, setExito] = useState(null);
+  const [resultadoCamara, setResultadoCamara] = useState(null);
+  const [procesandoCamara, setProcesandoCamara] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -38,6 +41,67 @@ export default function EscanearScreen() {
     setIdEscaneo(null);
     setLineas([]);
     limpiarMensajes();
+  };
+
+  const cambiarModo = (valor) => {
+    setModo(valor);
+    setImagen(null);
+    setResultadoCamara(null);
+    limpiarMensajes();
+  };
+
+  const tomarFotoAlimento = async () => {
+    limpiarMensajes();
+    try {
+      const permiso = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permiso.granted) {
+        setError('Necesitamos acceso a tu cámara para identificar el alimento.');
+        return;
+      }
+      const resultado = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+      if (!resultado.canceled) setImagen(resultado.assets[0].uri);
+    } catch (err) {
+      setError('No se pudo abrir la cámara. Prueba con "Elegir de galería".');
+    }
+  };
+
+  const elegirImagenAlimento = async () => {
+    limpiarMensajes();
+    const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permiso.granted) {
+      setError('Necesitamos acceso a tus fotos para identificar el alimento.');
+      return;
+    }
+    const resultado = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+    if (!resultado.canceled) setImagen(resultado.assets[0].uri);
+  };
+
+  const identificarAlimento = async () => {
+    if (!imagen) return;
+    limpiarMensajes();
+    setProcesandoCamara(true);
+    try {
+      const formData = new FormData();
+      if (Platform.OS === 'web') {
+        const respuesta = await fetch(imagen);
+        formData.append('archivo', await respuesta.blob(), 'alimento.jpg');
+      } else {
+        formData.append('archivo', { uri: imagen, name: 'alimento.jpg', type: 'image/jpeg' });
+      }
+      const { data } = await api.post('/api/v1/camara/identificar', formData);
+      setResultadoCamara(data);
+    } catch (err) {
+      setError(mensajeDeError(err, 'No se pudo identificar el alimento.'));
+    } finally {
+      setProcesandoCamara(false);
+    }
+  };
+
+  const registrarManualmente = () => {
+    navigation.navigate('Agregar', { nombre: resultadoCamara?.nombre || '' });
   };
 
   const seleccionarImagen = async () => {
@@ -194,10 +258,80 @@ export default function EscanearScreen() {
     }
   };
 
+  if (modo === 'camara') {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }}>
+        <Text variant="headlineMedium" style={styles.title}>Identificar alimento</Text>
+        <SegmentedButtons
+          value={modo}
+          onValueChange={cambiarModo}
+          style={styles.modeSelector}
+          buttons={[
+            { value: 'camara', label: 'Alimento', icon: 'camera-outline' },
+            { value: 'factura', label: 'Factura', icon: 'receipt-text-outline' },
+          ]}
+        />
+        <Text style={styles.subtitle}>Apunta a una fruta o verdura completa, con buena luz y sin objetos que la tapen.</Text>
+        <View style={styles.supportedBox}>
+          <Text variant="titleSmall">Alimentos reconocibles</Text>
+          <Text style={styles.supportedText}>Banano, manzana, naranja, tomate, pepino, pimentón y papa.</Text>
+        </View>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {imagen ? (
+          <Image source={{ uri: imagen }} style={styles.preview} />
+        ) : (
+          <View style={styles.placeholder}>
+            <Text style={styles.placeholderText}>Aún no has tomado una foto</Text>
+          </View>
+        )}
+        <Button mode="contained" icon="camera" onPress={tomarFotoAlimento} style={styles.button} disabled={procesandoCamara}>
+          Tomar foto
+        </Button>
+        <Button mode="outlined" icon="image" onPress={elegirImagenAlimento} style={styles.button} disabled={procesandoCamara}>
+          Elegir de galería
+        </Button>
+        {imagen && !resultadoCamara ? (
+          <Button mode="contained" onPress={identificarAlimento} style={styles.button} loading={procesandoCamara} disabled={procesandoCamara}>
+            {procesandoCamara ? 'Identificando...' : 'Identificar alimento'}
+          </Button>
+        ) : null}
+        {resultadoCamara ? (
+          <View style={styles.resultCard}>
+            <Text variant="titleLarge">{resultadoCamara.nombre || 'Alimento no reconocido'}</Text>
+            {resultadoCamara.estado ? <Text style={styles.resultState}>Estado: {resultadoCamara.estado}</Text> : null}
+            <Text style={styles.resultConfidence}>
+              Confianza: {Math.round(resultadoCamara.confianza * 100)}%
+            </Text>
+            <Text style={styles.resultMessage}>{resultadoCamara.mensaje}</Text>
+            {resultadoCamara.repetir ? (
+              <Button mode="contained" icon="camera-retake" onPress={() => { setResultadoCamara(null); setImagen(null); }} style={styles.button}>
+                Repetir foto
+              </Button>
+            ) : null}
+            {!resultadoCamara.aceptado ? (
+              <Button mode="outlined" icon="plus" onPress={registrarManualmente} style={styles.button}>
+                Registrar manualmente
+              </Button>
+            ) : null}
+          </View>
+        ) : null}
+      </ScrollView>
+    );
+  }
+
   if (!idEscaneo) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }}>
         <Text variant="headlineMedium" style={styles.title}>Escanear factura</Text>
+        <SegmentedButtons
+          value={modo}
+          onValueChange={cambiarModo}
+          style={styles.modeSelector}
+          buttons={[
+            { value: 'camara', label: 'Alimento', icon: 'camera-outline' },
+            { value: 'factura', label: 'Factura', icon: 'receipt-text-outline' },
+          ]}
+        />
 
         {aviso ? <Text style={styles.aviso}>{aviso}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -311,6 +445,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F7F5' },
   title: { marginBottom: 8, paddingHorizontal: 24, paddingTop: 24 },
   subtitle: { color: '#666', marginBottom: 16, paddingHorizontal: 24 },
+  modeSelector: { marginHorizontal: 24, marginBottom: 16 },
+  supportedBox: { marginHorizontal: 24, marginBottom: 16, padding: 12, backgroundColor: '#E8F5E9', borderRadius: 8 },
+  supportedText: { color: '#345C38', marginTop: 4 },
   placeholder: {
     width: '90%', alignSelf: 'center', height: 220, backgroundColor: '#EEE',
     justifyContent: 'center', alignItems: 'center',
@@ -328,4 +465,8 @@ const styles = StyleSheet.create({
   error: { color: '#b3261e', backgroundColor: '#fdecea', padding: 10, borderRadius: 8, marginHorizontal: 24, marginBottom: 12, textAlign: 'center' },
   aviso: { color: '#5a3d00', backgroundColor: '#FFF4E5', padding: 10, borderRadius: 8, marginHorizontal: 24, marginBottom: 12, textAlign: 'center' },
   exito: { color: '#1B5E20', backgroundColor: '#E8F5E9', padding: 10, borderRadius: 8, marginHorizontal: 24, marginBottom: 12, textAlign: 'center' },
+  resultCard: { backgroundColor: '#FFF', borderRadius: 12, padding: 16, marginHorizontal: 24, marginTop: 8, elevation: 1 },
+  resultState: { color: '#2E7D32', fontSize: 18, marginTop: 8, textTransform: 'capitalize' },
+  resultConfidence: { marginTop: 8, fontWeight: '600' },
+  resultMessage: { color: '#666', marginTop: 8, marginBottom: 8 },
 });

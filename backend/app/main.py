@@ -7,6 +7,7 @@ confirme (eso ya es HU-04).
 """
 
 import time
+import os
 from datetime import date
 
 import cv2
@@ -23,6 +24,7 @@ from .ocr import extraer_texto
 from .parser_factura import parsear_factura
 from .auth import fecha_expiracion, hash_password, usuario_actual, validar_correo, verificar_password
 from .storage import conectar, crear_sesion
+from .vision import CONFIANZA_MINIMA, VERSION_MODELO, identificar
 
 app = FastAPI(
     title="FreshTrack — OCR de facturas",
@@ -32,7 +34,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://localhost:\d+",  # permite cualquier puerto local (Expo web)
+    allow_origins=[
+      origen.strip() for origen in os.getenv("FRESHTRACK_ALLOWED_ORIGINS", "").split(",")
+      if origen.strip()
+    ],
+    # Desarrollo local y Expo web desde otro dispositivo de la misma red.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -473,3 +480,59 @@ async def escanear_factura(archivo: UploadFile = File(...), usuario=Depends(usua
             for p in productos
         ],
     }
+
+
+@app.post("/api/v1/camara/identificar")
+async def identificar_alimento(archivo: UploadFile = File(...), usuario=Depends(usuario_actual)):
+  """Identifica un alimento fotografiado y guarda también los intentos fallidos."""
+  if archivo.content_type not in FORMATOS_VALIDOS:
+    raise HTTPException(status_code=400, detail="Formato no soportado. Use JPG, PNG o WEBP.")
+  contenido = await archivo.read()
+  if not contenido:
+    raise HTTPException(status_code=400, detail="El archivo llegó vacío")
+  if len(contenido) > TAMANO_MAXIMO:
+    raise HTTPException(status_code=413, detail="La imagen supera los 10 MB")
+  try:
+    resultado = identificar(contenido)
+  except FileNotFoundError as error:
+    raise HTTPException(status_code=503, detail=str(error)) from error
+  except (RuntimeError, ValueError) as error:
+    raise HTTPException(status_code=422, detail=str(error)) from error
+
+  with conectar() as conexion:
+    fila = conexion.execute(
+      """INSERT INTO identificacion_camara
+         (id_usuario, nombre, estado, confianza, reconocido, clase_modelo, version_modelo)
+         VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id_identificacion""",
+      (usuario["id_usuario"], resultado["nombre"], resultado["estado"],
+       resultado["confianza"], int(resultado["reconocido"]), resultado["clase"], VERSION_MODELO),
+    ).fetchone()
+
+  if resultado["reconocido"] and resultado["repetir"]:
+    mensaje = "La confianza es baja. Repite la foto con mejor luz y encuadre."
+  elif resultado["reconocido"]:
+    mensaje = "Identificación aceptada."
+  else:
+    mensaje = "No reconocemos ese alimento. Puedes registrarlo manualmente."
+  return {
+    **resultado,
+    "id_identificacion": fila["id_identificacion"],
+    "confianza_minima": CONFIANZA_MINIMA,
+    "mensaje": mensaje,
+  }
+
+
+@app.get("/api/v1/camara/alimentos")
+def alimentos_reconocibles(usuario=Depends(usuario_actual)):
+  """Lista los alimentos que el modelo puede identificar."""
+  return {"alimentos": ["Banano", "Manzana", "Naranja", "Tomate", "Pepino", "Pimentón", "Papa"]}
+
+
+@app.get("/api/v1/camara/historial")
+def historial_camara(usuario=Depends(usuario_actual)):
+  with conectar() as conexion:
+    filas = conexion.execute(
+      "SELECT * FROM identificacion_camara WHERE id_usuario = ? ORDER BY creado_en DESC",
+      (usuario["id_usuario"],),
+    ).fetchall()
+  return {"identificaciones": [dict(fila) for fila in filas]}

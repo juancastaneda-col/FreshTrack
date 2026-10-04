@@ -75,11 +75,23 @@ def inicializar(conexion):
             actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(id_usuario, texto_crudo)
         );
+        CREATE TABLE IF NOT EXISTS identificacion_camara (
+            id_identificacion INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario) ON DELETE CASCADE,
+            nombre TEXT,
+            estado TEXT,
+            confianza REAL NOT NULL CHECK (confianza BETWEEN 0 AND 1),
+            reconocido INTEGER NOT NULL DEFAULT 0,
+            clase_modelo TEXT,
+            version_modelo TEXT NOT NULL,
+            creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE INDEX IF NOT EXISTS idx_sesion_usuario ON sesion(id_usuario);
         CREATE INDEX IF NOT EXISTS idx_item_usuario ON item_inventario(id_usuario);
         CREATE INDEX IF NOT EXISTS idx_escaneo_usuario ON escaneo_borrador(id_usuario);
         CREATE INDEX IF NOT EXISTS idx_linea_escaneo ON linea_detectada(id_escaneo);
         CREATE INDEX IF NOT EXISTS idx_correccion_usuario ON correccion_alias(id_usuario);
+        CREATE INDEX IF NOT EXISTS idx_identificacion_usuario ON identificacion_camara(id_usuario);
         """
     )
     _migrar_columnas(conexion)

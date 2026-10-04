@@ -6,3 +6,4 @@ opencv-python-headless==4.*
 numpy==2.*
 pillow==11.*
 ai-edge-litert
+tensorflow-cpu==2.20.*
