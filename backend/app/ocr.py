@@ -17,11 +17,16 @@ from .preprocesamiento import preparar_variantes
 
 import pytesseract
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR"
-# --psm 6 = "asumir un bloque uniforme de texto".
-# Es el modo que mejor funciona con facturas, porque son una columna
-# de líneas. El modo automático tiende a confundirse con los logos.
-CONFIG_TESSERACT = "--oem 3 --psm 6"
 IDIOMA = "spa"
+
+# Modos PSM a probar: 6 = bloque uniforme, 4 = columna única, 11 = texto disperso.
+# Las facturas son mayormente una columna, pero el arrugado hace que 4 y 11
+# a veces lean mejor que el estricto modo 6.
+CONFIGS_TESSERACT = [
+    "--oem 3 --psm 6",
+    "--oem 3 --psm 4",
+    "--oem 3 --psm 11",
+]
 
 
 def _configurar_tesseract():
@@ -82,18 +87,20 @@ def extraer_texto(imagen_bgr):
     mejor = {"texto": "", "confianza": 0.0, "variante": None}
 
     for nombre, imagen in variantes.items():
-        datos = pytesseract.image_to_data(
-            imagen,
-            lang=IDIOMA,
-            config=CONFIG_TESSERACT,
-            output_type=Output.DICT,
-        )
-        confianza = _confianza_promedio(datos)
-        if confianza > mejor["confianza"]:
-            mejor = {
-                "texto": _texto_de_datos(datos),
-                "confianza": round(confianza, 3),
-                "variante": nombre,
-            }
+        for config in CONFIGS_TESSERACT:
+            datos = pytesseract.image_to_data(
+                imagen,
+                lang=IDIOMA,
+                config=config,
+                output_type=Output.DICT,
+            )
+            confianza = _confianza_promedio(datos)
+            clave = f"{nombre}+psm{config.split('--psm')[1].strip()}"
+            if confianza > mejor["confianza"]:
+                mejor = {
+                    "texto": _texto_de_datos(datos),
+                    "confianza": round(confianza, 3),
+                    "variante": clave,
+                }
 
     return mejor

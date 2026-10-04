@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 
-ANCHO_OBJETIVO = 1600  
+ANCHO_OBJETIVO = 2000
 
 
 def redimensionar(imagen):
@@ -116,15 +116,32 @@ def preparar(imagen_bgr, binarizada=True):
     return img
 
 
-def preparar_variantes(imagen_bgr):
-    """Devuelve varias versiones de la imagen para probar cuál lee mejor.
+def engrosar_texto(gris):
+    """Dilata el texto para que el OCR lo lea mejor en papel térmico arrugado.
 
-    En la práctica ninguna configuración funciona para todas las
-    facturas: la binarización ayuda con papel térmico gastado pero a
-    veces borra texto claro. Generamos las dos y dejamos que el OCR
-    decida cuál dio mejor resultado.
+    El papel térmico produce trazos muy finos que se pierden con las
+    arrugas. Una dilatación pequeña engrosa los caracteres sin fundirlos.
     """
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    return cv2.dilate(gris, kernel, iterations=1)
+
+
+def preparar_variantes(imagen_bgr):
+    """Devuelve varias versiones de la imagen para probar cuál lee mejor."""
+    base_gris = redimensionar(imagen_bgr)
+    base_gris = a_grises(base_gris)
+    base_gris = enderezar(base_gris)
+    base_gris = quitar_ruido(base_gris)
+    base_gris = mejorar_contraste(base_gris)
+
+    binarizada = binarizar(base_gris)
+
+    # Variante con texto engrosado — ayuda con recibos arrugados o papel térmico desgastado
+    engrosada = engrosar_texto(base_gris)
+    binarizada_engrosada = binarizar(engrosada)
+
     return {
-        "binarizada": preparar(imagen_bgr, binarizada=True),
-        "escala_grises": preparar(imagen_bgr, binarizada=False),
+        "binarizada": binarizada,
+        "escala_grises": base_gris,
+        "engrosada": binarizada_engrosada,
     }

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from . import catalogo
 from .catalogo import CATALOGO_ALIAS
+from .clasificador import clasificar as clasificar_alimento
 from .matching import asociar_catalogo
 from .ocr import extraer_texto
 from .parser_factura import parsear_factura
@@ -373,6 +374,28 @@ def _leer_imagen(contenido):
 def salud():
     """Verifica que el servicio esté arriba."""
     return {"estado": "ok"}
+
+
+@app.post("/api/v1/alimentos/clasificar")
+async def clasificar_foto(archivo: UploadFile = File(...), usuario=Depends(usuario_actual)):
+    """Recibe la foto de un alimento y devuelve si está fresco o dañado."""
+    if archivo.content_type not in FORMATOS_VALIDOS:
+        raise HTTPException(status_code=400,
+            detail=f"Formato no soportado: {archivo.content_type}. Use JPG, PNG o WEBP.")
+
+    contenido = await archivo.read()
+    if len(contenido) > TAMANO_MAXIMO:
+        raise HTTPException(status_code=413, detail="La imagen supera los 10 MB")
+    if not contenido:
+        raise HTTPException(status_code=400, detail="El archivo llegó vacío")
+
+    imagen = _leer_imagen(contenido)
+    try:
+        resultado = clasificar_alimento(imagen)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    return resultado
 
 
 @app.post("/api/v1/facturas/escanear")

@@ -3,8 +3,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import InventarioScreen from '../screens/InventarioScreen';
 import EscanearScreen from '../screens/EscanearScreen';
-import CuentaScreen from '../screens/CuentaScreen';
 import AgregarProductoScreen from '../screens/AgregarProductoScreen';
+import CuentaScreen from '../screens/CuentaScreen';
 
 const Tab = createBottomTabNavigator();
 
