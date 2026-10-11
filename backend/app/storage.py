@@ -92,27 +92,46 @@ def inicializar(conexion):
         CREATE INDEX IF NOT EXISTS idx_linea_escaneo ON linea_detectada(id_escaneo);
         CREATE INDEX IF NOT EXISTS idx_correccion_usuario ON correccion_alias(id_usuario);
         CREATE INDEX IF NOT EXISTS idx_identificacion_usuario ON identificacion_camara(id_usuario);
+        CREATE TABLE IF NOT EXISTS notificacion (
+            id_notificacion INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario) ON DELETE CASCADE,
+            id_item INTEGER NOT NULL REFERENCES item_inventario(id_item) ON DELETE CASCADE,
+            tipo TEXT NOT NULL DEFAULT 'vencimiento_proximo',
+            mensaje TEXT NOT NULL,
+            fecha_generada TEXT NOT NULL DEFAULT CURRENT_DATE,
+            leida INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(id_item, tipo, fecha_generada)
+        );
+        CREATE INDEX IF NOT EXISTS idx_notificacion_usuario ON notificacion(id_usuario);
         """
     )
     _migrar_columnas(conexion)
 
 
 def _migrar_columnas(conexion):
-    columnas = {fila["name"] for fila in conexion.execute("PRAGMA table_info(item_inventario)")}
-    if "unidad" not in columnas:
+    col_item = {fila["name"] for fila in conexion.execute("PRAGMA table_info(item_inventario)")}
+    if "unidad" not in col_item:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN unidad TEXT NOT NULL DEFAULT 'UND'")
-    if "condicion" not in columnas:
+    if "condicion" not in col_item:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN condicion TEXT NOT NULL DEFAULT 'fuera'")
-    if "id_escaneo" not in columnas:
+    if "id_escaneo" not in col_item:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN id_escaneo INTEGER")
-    if "creado_en" not in columnas:
+    if "creado_en" not in col_item:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN creado_en TEXT")
-    if "id_alimento" not in columnas:
+    if "id_alimento" not in col_item:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN id_alimento INTEGER")
-    if "fecha_vencimiento_est" not in columnas:
+    if "fecha_vencimiento_est" not in col_item:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN fecha_vencimiento_est TEXT")
-    if "fecha_cierre" not in columnas:
+    if "fecha_cierre" not in col_item:
         conexion.execute("ALTER TABLE item_inventario ADD COLUMN fecha_cierre TEXT")
+
+    col_usuario = {fila["name"] for fila in conexion.execute("PRAGMA table_info(usuario)")}
+    if "dias_anticipacion" not in col_usuario:
+        conexion.execute("ALTER TABLE usuario ADD COLUMN dias_anticipacion INTEGER NOT NULL DEFAULT 3")
+    if "correo_notificaciones" not in col_usuario:
+        conexion.execute("ALTER TABLE usuario ADD COLUMN correo_notificaciones TEXT")
+    if "notificaciones_activas" not in col_usuario:
+        conexion.execute("ALTER TABLE usuario ADD COLUMN notificaciones_activas INTEGER NOT NULL DEFAULT 1")
 
 
 def crear_sesion(conexion, id_usuario, expira_en):

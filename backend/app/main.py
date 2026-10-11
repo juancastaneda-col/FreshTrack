@@ -6,17 +6,30 @@ devuelve la lista de productos detectados para que el usuario los
 confirme (eso ya es HU-04).
 """
 
+import logging
 import time
 import os
 from datetime import date
+from pathlib import Path
+
+# Carga .env si existe (sin dependencias extra)
+_env_path = Path(__file__).parent.parent / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text().splitlines():
+        if _line.strip() and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 import cv2
 import numpy as np
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from . import catalogo
+from .alertas import revisar_vencimientos
 from .catalogo import CATALOGO_ALIAS
 from .clasificador import clasificar as clasificar_alimento
 from .matching import asociar_catalogo
@@ -26,11 +39,30 @@ from .auth import fecha_expiracion, hash_password, usuario_actual, validar_corre
 from .storage import conectar, crear_sesion
 from .vision import CONFIANZA_MINIMA, VERSION_MODELO, identificar
 
+logging.basicConfig(level=logging.INFO)
+_scheduler = BackgroundScheduler()
+
 app = FastAPI(
     title="FreshTrack — OCR de facturas",
     description="HU-03 · Escanear factura de mercado",
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+def _iniciar_scheduler():
+    _scheduler.add_job(
+        revisar_vencimientos,
+        CronTrigger(hour=8, minute=0),
+        id="revision_diaria_vencimientos",
+        replace_existing=True,
+    )
+    _scheduler.start()
+
+
+@app.on_event("shutdown")
+def _detener_scheduler():
+    _scheduler.shutdown(wait=False)
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,6 +80,7 @@ app.add_middleware(
 TAMANO_MAXIMO = 10 * 1024 * 1024          # 10 MB
 FORMATOS_VALIDOS = {"image/jpeg", "image/png", "image/webp"}
 
+
 # Si el OCR lee con menos confianza que esto, probablemente la foto
 # está muy mala y es mejor pedirle al usuario que la repita.
 CONFIANZA_MINIMA_ACEPTABLE = 0.40
@@ -61,6 +94,10 @@ class ActualizacionCuenta(BaseModel):
   nombre: str | None = Field(default=None, min_length=1, max_length=120)
   password_actual: str | None = None
   nueva_password: str | None = Field(default=None, min_length=8, max_length=128)
+
+class PreferenciasNotificacion(BaseModel):
+  notificaciones_activas: bool
+  correo_notificaciones: str | None = Field(default=None, max_length=254)
 
 class ItemInventario(BaseModel):
   id_alimento: int | None = None
@@ -156,6 +193,29 @@ def actualizar_cuenta(datos: ActualizacionCuenta, usuario=Depends(usuario_actual
       (usuario["id_usuario"],),
     ).fetchone()
   return dict(fila)
+
+@app.get("/api/v1/perfil/notificaciones")
+def obtener_preferencias_notificacion(usuario=Depends(usuario_actual)):
+  with conectar() as conexion:
+    fila = conexion.execute(
+      "SELECT notificaciones_activas, correo_notificaciones FROM usuario WHERE id_usuario = ?",
+      (usuario["id_usuario"],),
+    ).fetchone()
+  return {
+    "notificaciones_activas": bool(fila["notificaciones_activas"]),
+    "correo_notificaciones": fila["correo_notificaciones"],
+  }
+
+@app.patch("/api/v1/perfil/notificaciones")
+def actualizar_preferencias_notificacion(datos: PreferenciasNotificacion, usuario=Depends(usuario_actual)):
+  correo = datos.correo_notificaciones.strip() if datos.correo_notificaciones else None
+  with conectar() as conexion:
+    conexion.execute(
+      "UPDATE usuario SET notificaciones_activas = ?, correo_notificaciones = ? WHERE id_usuario = ?",
+      (1 if datos.notificaciones_activas else 0, correo, usuario["id_usuario"]),
+    )
+  return {"notificaciones_activas": datos.notificaciones_activas, "correo_notificaciones": correo}
+
 
 @app.get("/api/v1/inventario")
 def listar_inventario(usuario=Depends(usuario_actual)):
@@ -520,6 +580,77 @@ async def identificar_alimento(archivo: UploadFile = File(...), usuario=Depends(
     "confianza_minima": CONFIANZA_MINIMA,
     "mensaje": mensaje,
   }
+
+
+@app.get("/api/v1/notificaciones")
+def listar_notificaciones(usuario=Depends(usuario_actual)):
+  """Devuelve las notificaciones no leídas del usuario."""
+  with conectar() as conexion:
+    filas = conexion.execute(
+      """SELECT id_notificacion, id_item, tipo, mensaje, fecha_generada, leida
+         FROM notificacion
+         WHERE id_usuario = ?
+         ORDER BY fecha_generada DESC, id_notificacion DESC""",
+      (usuario["id_usuario"],),
+    ).fetchall()
+  return {"notificaciones": [dict(fila) for fila in filas]}
+
+
+@app.patch("/api/v1/notificaciones/{id_notificacion}/leer", status_code=204)
+def marcar_leida(id_notificacion: int, usuario=Depends(usuario_actual)):
+  with conectar() as conexion:
+    cursor = conexion.execute(
+      "UPDATE notificacion SET leida = 1 WHERE id_notificacion = ? AND id_usuario = ?",
+      (id_notificacion, usuario["id_usuario"]),
+    )
+    if cursor.rowcount == 0:
+      raise HTTPException(status_code=404, detail="Notificación no encontrada")
+  return Response(status_code=204)
+
+
+@app.post("/api/v1/alertas/revisar", status_code=200)
+def disparar_revision(usuario=Depends(usuario_actual)):
+  """Dispara manualmente el proceso de revisión de vencimientos."""
+  try:
+    generadas = revisar_vencimientos()
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail="Error al revisar vencimientos") from exc
+  return {"mensaje": "Revisión completada", "notificaciones_generadas": generadas}
+
+
+@app.post("/api/v1/alertas/prueba", status_code=200)
+def enviar_notificacion_prueba(usuario=Depends(usuario_actual)):
+  """Envía un correo de prueba al usuario con todos sus productos activos que tienen fecha de vencimiento."""
+  from datetime import date
+  from .alertas import _enviar_email
+  id_usuario = usuario["id_usuario"]
+  with conectar() as conexion:
+    fila_usuario = conexion.execute(
+      "SELECT correo, correo_notificaciones FROM usuario WHERE id_usuario = ?", (id_usuario,)
+    ).fetchone()
+    items = conexion.execute(
+      """SELECT nombre, fecha_vencimiento_est FROM item_inventario
+         WHERE id_usuario = ? AND situacion = 'activo' AND fecha_vencimiento_est IS NOT NULL
+         ORDER BY fecha_vencimiento_est""",
+      (id_usuario,),
+    ).fetchall()
+  if not items:
+    raise HTTPException(status_code=404, detail="No tienes productos con fecha de vencimiento registrada.")
+  hoy = date.today()
+  mensajes = []
+  for item in items:
+    dias = (date.fromisoformat(item["fecha_vencimiento_est"]) - hoy).days
+    if dias < 0:
+      mensajes.append(f"{item['nombre']} venció hace {abs(dias)} día(s).")
+    elif dias == 0:
+      mensajes.append(f"{item['nombre']} vence hoy.")
+    elif dias == 1:
+      mensajes.append(f"{item['nombre']} vence mañana.")
+    else:
+      mensajes.append(f"{item['nombre']} vence en {dias} días.")
+  destino = fila_usuario["correo_notificaciones"] or fila_usuario["correo"]
+  _enviar_email(destino, mensajes)
+  return {"mensaje": f"Correo de prueba enviado a {destino}", "items": len(mensajes)}
 
 
 @app.get("/api/v1/camara/alimentos")

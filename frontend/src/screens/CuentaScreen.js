@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { View, StyleSheet, Alert, Platform, ScrollView } from 'react-native';
+import { View, StyleSheet, Alert, Platform, ScrollView, Switch } from 'react-native';
 import { Text, TextInput, Button, ActivityIndicator, Divider, List } from 'react-native-paper';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { api } from '../services/api';
@@ -20,11 +20,17 @@ export default function CuentaScreen() {
   const [historial, setHistorial] = useState([]);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
 
+  const [notifActivas, setNotifActivas] = useState(true);
+  const [correoNotif, setCorreoNotif] = useState('');
+  const [guardandoNotif, setGuardandoNotif] = useState(false);
+  const [enviandoPrueba, setEnviandoPrueba] = useState(false);
+
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS === 'web') document.title = 'Mi cuenta · FreshTrack';
       cargarCuenta();
       cargarHistorial();
+      cargarPreferenciasNotif();
     }, [])
   );
 
@@ -38,6 +44,41 @@ export default function CuentaScreen() {
       // si falla, se queda vacío
     } finally {
       setCargando(false);
+    }
+  };
+
+  const cargarPreferenciasNotif = async () => {
+    try {
+      const { data } = await api.get('/api/v1/perfil/notificaciones');
+      setNotifActivas(data.notificaciones_activas);
+      setCorreoNotif(data.correo_notificaciones || '');
+    } catch (_) {}
+  };
+
+  const enviarPrueba = async () => {
+    setEnviandoPrueba(true);
+    try {
+      const { data } = await api.post('/api/v1/alertas/prueba');
+      Alert.alert('Correo enviado', `Se envió un correo de prueba a ${data.mensaje.replace('Correo de prueba enviado a ', '')}.`);
+    } catch (error) {
+      Alert.alert('Error', error.response?.data?.detail || 'No se pudo enviar el correo.');
+    } finally {
+      setEnviandoPrueba(false);
+    }
+  };
+
+  const guardarNotificaciones = async () => {
+    setGuardandoNotif(true);
+    try {
+      await api.patch('/api/v1/perfil/notificaciones', {
+        notificaciones_activas: notifActivas,
+        correo_notificaciones: correoNotif.trim() || null,
+      });
+      Alert.alert('Listo', 'Preferencias de notificación guardadas.');
+    } catch (error) {
+      Alert.alert('Error', error.response?.data?.detail || 'No se pudo guardar.');
+    } finally {
+      setGuardandoNotif(false);
     }
   };
 
@@ -183,6 +224,58 @@ export default function CuentaScreen() {
         </Button>
       </View>
 
+      <Divider style={{ marginVertical: 20 }} />
+
+      <View style={styles.card}>
+        <Text variant="titleMedium" style={{ marginBottom: 12 }}>Notificaciones por correo</Text>
+
+        <View style={styles.filaSwitch}>
+          <Text style={styles.labelSwitch}>Recibir alertas de vencimiento</Text>
+          <Switch value={notifActivas} onValueChange={setNotifActivas} />
+        </View>
+
+        {notifActivas && (
+          <>
+            <Text style={[styles.etiqueta, { marginTop: 16, marginBottom: 4 }]}>
+              Correo para las alertas (opcional)
+            </Text>
+            <Text style={styles.etiquetaHint}>
+              Si lo dejas vacío, se usará el correo de tu cuenta.
+            </Text>
+            <TextInput
+              mode="outlined"
+              placeholder={correo}
+              value={correoNotif}
+              onChangeText={setCorreoNotif}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              style={styles.input}
+            />
+          </>
+        )}
+
+        <Button
+          mode="contained"
+          onPress={guardarNotificaciones}
+          loading={guardandoNotif}
+          disabled={guardandoNotif}
+          style={{ marginTop: 12 }}
+        >
+          Guardar preferencias
+        </Button>
+
+        <Button
+          mode="outlined"
+          icon="email-outline"
+          onPress={enviarPrueba}
+          loading={enviandoPrueba}
+          disabled={enviandoPrueba}
+          style={{ marginTop: 8 }}
+        >
+          Enviar notificación de prueba
+        </Button>
+      </View>
+
       <Button
         mode="contained"
         buttonColor="#C62828"
@@ -209,4 +302,7 @@ const styles = StyleSheet.create({
   filaBotones: { flexDirection: 'row', marginTop: 8 },
   historialVacio: { color: '#666', marginVertical: 8 },
   cerrarBoton: { marginTop: 24 },
+  filaSwitch: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  labelSwitch: { fontSize: 15, flex: 1, marginRight: 8 },
+  etiquetaHint: { fontSize: 12, color: '#888', marginBottom: 4 },
 });
