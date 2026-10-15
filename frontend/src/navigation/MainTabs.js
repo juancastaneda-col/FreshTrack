@@ -3,6 +3,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import InventarioScreen from '../screens/InventarioScreen';
 import EscanearScreen from '../screens/EscanearScreen';
+import EscanearAlimentoScreen from '../screens/EscanearAlimentoScreen';
 import AgregarProductoScreen from '../screens/AgregarProductoScreen';
 import CuentaScreen from '../screens/CuentaScreen';
 
@@ -19,10 +20,17 @@ export default function MainTabs() {
         )}}
       />
       <Tab.Screen
-        name="Escanear"
+        name="Escanear Factura"
         component={EscanearScreen}
         options={{ tabBarIcon: ({ color, size }) => (
-          <MaterialCommunityIcons name="camera-outline" color={color} size={size} />
+          <MaterialCommunityIcons name="receipt-text-outline" color={color} size={size} />
+        )}}
+      />
+      <Tab.Screen
+        name="Escanear Alimento"
+        component={EscanearAlimentoScreen}
+        options={{ tabBarIcon: ({ color, size }) => (
+          <MaterialCommunityIcons name="food-apple-outline" color={color} size={size} />
         )}}
       />
       <Tab.Screen
