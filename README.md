@@ -78,3 +78,4 @@ El celular y el PC deben estar en la misma red. El firewall de Windows debe perm
 
 - El escaneo de facturas necesita buena luz y texto legible; si sale "confianza baja", intenta con otra foto.
 - Los datos se guardan en una base SQLite local (no se sube al repositorio).
+- El recetario se carga automáticamente en SQLite al iniciar el backend.

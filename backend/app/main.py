@@ -230,6 +230,138 @@ def listar_inventario(usuario=Depends(usuario_actual)):
   return {"items": [dict(fila) for fila in filas]}
 
 
+def _receta_dict(fila, disponibles):
+  ingredientes = [int(valor) for valor in (fila["ingredientes"] or "").split(",") if valor]
+  disponibles_ids = {item["id_alimento"] for item in disponibles if item["id_alimento"] is not None}
+  nombres = {item["id_alimento"]: item["nombre"] for item in disponibles}
+  disponibles_receta = [nombres[aid] for aid in ingredientes if aid in disponibles_ids]
+  faltantes = [catalogo.obtener(aid)["nombre"] for aid in ingredientes
+               if aid not in disponibles_ids and catalogo.obtener(aid)]
+  return {
+    "id_receta": fila["id_receta"],
+    "titulo": fila["titulo"],
+    "minutos_prep": fila["minutos_prep"],
+    "porciones": fila["porciones"],
+    "pasos": fila["pasos"],
+    "imagen_url": (
+      "https://images.unsplash.com/photo-1498837167922-ddd27525d352"
+      "?auto=format&fit=crop&w=900&q=80"
+    ),
+    "fuente": "FreshTrack",
+    "ingredientes": [catalogo.obtener(aid)["nombre"] for aid in ingredientes if catalogo.obtener(aid)],
+    "ingrediente_ids": ingredientes,
+    "disponibles": disponibles_receta,
+    "faltantes": faltantes,
+    "cobertura": round(len(disponibles_receta) / len(ingredientes), 2) if ingredientes else 0,
+  }
+
+
+@app.get("/api/v1/recetas")
+def listar_recetas(
+  q: str | None = None,
+  id_item: int | None = None,
+  usuario=Depends(usuario_actual),
+):
+  """Recomienda recetas según los alimentos activos del usuario."""
+  with conectar() as conexion:
+    disponibles = [dict(fila) for fila in conexion.execute(
+      "SELECT DISTINCT id_alimento, nombre FROM item_inventario "
+      "WHERE id_usuario = ? AND situacion = 'activo'", (usuario["id_usuario"],)
+    ).fetchall()]
+    item_prioritario = None
+    if id_item is not None:
+      item_prioritario = conexion.execute(
+        "SELECT id_item, id_alimento, nombre FROM item_inventario "
+        "WHERE id_item = ? AND id_usuario = ? AND situacion = 'activo'",
+        (id_item, usuario["id_usuario"]),
+      ).fetchone()
+    filas = conexion.execute(
+      "SELECT r.id_receta, r.titulo, r.minutos_prep, r.porciones, r.pasos, "
+      "GROUP_CONCAT(ri.id_alimento) AS ingredientes "
+      "FROM receta r JOIN receta_ingrediente ri ON ri.id_receta = r.id_receta "
+      "GROUP BY r.id_receta ORDER BY r.id_receta"
+    ).fetchall()
+  recetas = [_receta_dict(fila, disponibles) for fila in filas]
+  if id_item is not None:
+    if item_prioritario is None:
+      raise HTTPException(status_code=404, detail="Producto no encontrado en tu inventario activo")
+    recetas = [
+      receta for receta in recetas
+      if item_prioritario["id_alimento"] in receta["ingrediente_ids"]
+    ]
+  if q and q.strip():
+    termino = q.strip().casefold()
+    recetas = [receta for receta in recetas if termino in receta["titulo"].casefold()
+               or any(termino in ingrediente.casefold() for ingrediente in receta["ingredientes"])]
+  recetas.sort(key=lambda receta: (-receta["cobertura"], len(receta["faltantes"]), receta["titulo"]))
+  if id_item is not None:
+    recetas = recetas[:5]
+  return {
+    "recetas": recetas,
+    "total": len(recetas),
+    "producto_prioritario": (
+      item_prioritario["nombre"]
+      if id_item is not None and item_prioritario is not None else None
+    ),
+  }
+
+
+@app.get("/api/v1/recetas/{id_receta}")
+def ver_receta(id_receta: int, usuario=Depends(usuario_actual)):
+  with conectar() as conexion:
+    fila = conexion.execute(
+      "SELECT r.id_receta, r.titulo, r.minutos_prep, r.porciones, r.pasos, "
+      "GROUP_CONCAT(ri.id_alimento) AS ingredientes "
+      "FROM receta r JOIN receta_ingrediente ri ON ri.id_receta = r.id_receta "
+      "WHERE r.id_receta = ? GROUP BY r.id_receta", (id_receta,)
+    ).fetchone()
+    disponibles = [dict(item) for item in conexion.execute(
+      "SELECT DISTINCT id_alimento, nombre FROM item_inventario "
+      "WHERE id_usuario = ? AND situacion = 'activo'", (usuario["id_usuario"],)
+    ).fetchall()]
+  if fila is None:
+    raise HTTPException(status_code=404, detail="Receta no encontrada")
+  return _receta_dict(fila, disponibles)
+
+
+class AccionReceta(BaseModel):
+  accion: str = Field(pattern="^(vista|usada|descartada)$")
+
+
+@app.post("/api/v1/recetas/{id_receta}/accion", status_code=201)
+def registrar_accion_receta(id_receta: int, datos: AccionReceta, usuario=Depends(usuario_actual)):
+  with conectar() as conexion:
+    existe = conexion.execute("SELECT 1 FROM receta WHERE id_receta = ?", (id_receta,)).fetchone()
+    if existe is None:
+      raise HTTPException(status_code=404, detail="Receta no encontrada")
+    columnas = {fila["name"] for fila in conexion.execute("PRAGMA table_info(sugerencia_receta)")}
+    if "id_item" in columnas:
+      item = conexion.execute(
+        """SELECT i.id_item
+           FROM item_inventario i
+           JOIN receta_ingrediente ri ON ri.id_alimento = i.id_alimento
+           WHERE i.id_usuario = ? AND i.situacion = 'activo' AND ri.id_receta = ?
+           ORDER BY i.fecha_vencimiento_est IS NULL, i.fecha_vencimiento_est
+           LIMIT 1""",
+        (usuario["id_usuario"], id_receta),
+      ).fetchone()
+      if item is None:
+        raise HTTPException(
+          status_code=422,
+          detail="Necesitas tener al menos un ingrediente activo para registrar esta acción",
+        )
+      conexion.execute(
+        "INSERT INTO sugerencia_receta (id_usuario, id_item, id_receta, accion) VALUES (?, ?, ?, ?)",
+        (usuario["id_usuario"], item["id_item"], id_receta, datos.accion),
+      )
+    else:
+      conexion.execute(
+        "INSERT INTO sugerencia_receta (id_usuario, id_receta, accion) VALUES (?, ?, ?)",
+        (usuario["id_usuario"], id_receta, datos.accion),
+      )
+  return {"mensaje": "Acción registrada"}
+
+
 @app.get("/api/v1/catalogo")
 def buscar_catalogo(q: str, usuario=Depends(usuario_actual)):
   return {"resultados": catalogo.buscar(q)}
