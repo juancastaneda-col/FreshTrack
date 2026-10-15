@@ -5,6 +5,9 @@ import secrets
 import sqlite3
 from contextlib import contextmanager
 
+from .catalogo import obtener
+from .recetas import RECETAS
+
 
 RUTA_BD = os.getenv("FRESHTRACK_DB", "freshtrack.db")
 
@@ -103,9 +106,105 @@ def inicializar(conexion):
             UNIQUE(id_item, tipo, fecha_generada)
         );
         CREATE INDEX IF NOT EXISTS idx_notificacion_usuario ON notificacion(id_usuario);
+        CREATE TABLE IF NOT EXISTS receta (
+            id_receta INTEGER PRIMARY KEY,
+            titulo TEXT NOT NULL,
+            minutos_prep INTEGER NOT NULL CHECK (minutos_prep > 0),
+            porciones INTEGER NOT NULL CHECK (porciones > 0),
+            pasos TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS receta_ingrediente (
+            id_receta INTEGER NOT NULL REFERENCES receta(id_receta) ON DELETE CASCADE,
+            id_alimento INTEGER NOT NULL,
+            PRIMARY KEY (id_receta, id_alimento)
+        );
+        CREATE TABLE IF NOT EXISTS sugerencia_receta (
+            id_sugerencia INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario) ON DELETE CASCADE,
+            id_receta INTEGER NOT NULL REFERENCES receta(id_receta) ON DELETE CASCADE,
+            accion TEXT NOT NULL CHECK (accion IN ('vista','usada','descartada')),
+            creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_sugerencia_usuario ON sugerencia_receta(id_usuario);
         """
     )
     _migrar_columnas(conexion)
+    _migrar_recetas(conexion)
+
+
+def _migrar_recetas(conexion):
+    """Alinea el catálogo local con el esquema actual de recetas."""
+    columnas = {fila["name"] for fila in conexion.execute("PRAGMA table_info(receta)")}
+    columnas_ingrediente = {
+        fila["name"] for fila in conexion.execute("PRAGMA table_info(receta_ingrediente)")
+    }
+    if "pasos" not in columnas:
+        conexion.execute("ALTER TABLE receta ADD COLUMN pasos TEXT NOT NULL DEFAULT ''")
+        columnas.add("pasos")
+
+    existentes = conexion.execute("SELECT COUNT(*) AS total FROM receta").fetchone()["total"]
+    if existentes == len(RECETAS) and "pasos" in columnas:
+        return
+
+    ids_actuales = tuple(receta[0] for receta in RECETAS)
+    marcadores = ",".join("?" for _ in ids_actuales)
+    conexion.execute(
+        f"DELETE FROM sugerencia_receta WHERE id_receta NOT IN ({marcadores})",
+        ids_actuales,
+    )
+    conexion.execute(
+        f"DELETE FROM receta_ingrediente WHERE id_receta NOT IN ({marcadores})",
+        ids_actuales,
+    )
+    conexion.execute(
+        f"DELETE FROM receta WHERE id_receta NOT IN ({marcadores})",
+        ids_actuales,
+    )
+
+    for rid, titulo, ingredientes, minutos, porciones, pasos in RECETAS:
+        if "id_externo" in columnas:
+            conexion.execute(
+                """INSERT INTO receta
+                     (id_receta, id_externo, titulo, minutos_prep, porciones, pasos, fuente)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id_receta) DO UPDATE SET
+                     titulo = excluded.titulo,
+                     minutos_prep = excluded.minutos_prep,
+                     porciones = excluded.porciones,
+                     pasos = excluded.pasos,
+                     fuente = excluded.fuente""",
+                (rid, f"freshtrack-{rid:02d}", titulo, minutos, porciones, pasos, "FreshTrack"),
+            )
+        else:
+            conexion.execute(
+                """INSERT INTO receta (id_receta, titulo, minutos_prep, porciones, pasos)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(id_receta) DO UPDATE SET
+                     titulo = excluded.titulo,
+                     minutos_prep = excluded.minutos_prep,
+                     porciones = excluded.porciones,
+                     pasos = excluded.pasos""",
+                (rid, titulo, minutos, porciones, pasos),
+            )
+        conexion.execute("DELETE FROM receta_ingrediente WHERE id_receta = ?", (rid,))
+        if "nombre" in columnas_ingrediente:
+            conexion.executemany(
+                "INSERT INTO receta_ingrediente (id_receta, id_alimento, nombre, posicion) VALUES (?, ?, ?, ?)",
+                [
+                    (rid, ingrediente, _nombre_alimento(ingrediente), posicion)
+                    for posicion, ingrediente in enumerate(ingredientes, start=1)
+                ],
+            )
+        else:
+            conexion.executemany(
+                "INSERT INTO receta_ingrediente (id_receta, id_alimento) VALUES (?, ?)",
+                [(rid, ingrediente) for ingrediente in ingredientes],
+            )
+
+
+def _nombre_alimento(id_alimento):
+    """Obtiene el nombre del catálogo sin importar el módulo desde storage."""
+    return obtener(id_alimento)["nombre"]
 
 
 def _migrar_columnas(conexion):
