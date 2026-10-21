@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { View, StyleSheet, Image, Platform, ScrollView } from 'react-native';
-import { Text, Button, TextInput, IconButton } from 'react-native-paper';
+import { Text, Button, TextInput, IconButton, SegmentedButtons } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../services/api';
