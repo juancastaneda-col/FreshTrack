@@ -17,11 +17,7 @@ function mensajeDeError(error, fallback) {
 }
 
 const ALIMENTOS_SOPORTADOS = [
-  'Banano', 'Manzana', 'Naranja', 'Mandarina', 'Papaya', 'Piña', 'Mango',
-  'Fresa', 'Uva', 'Pera', 'Aguacate', 'Maracuyá', 'Limón', 'Tomate',
-  'Pepino', 'Pimentón', 'Zanahoria', 'Cebolla cabezona', 'Cebolla larga',
-  'Lechuga', 'Espinaca', 'Brócoli', 'Habichuela', 'Repollo', 'Plátano',
-  'Papa', 'Yuca', 'Arracacha', 'Remolacha', 'Cilantro',
+  'Banano', 'Manzana', 'Naranja', 'Tomate', 'Pepino', 'Pimentón', 'Papa',
 ];
 
 function DisclaimerModelo() {
