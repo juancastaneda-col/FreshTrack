@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Image, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Button, Text } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
@@ -14,6 +14,45 @@ function mensajeDeError(error, fallback) {
   if (Array.isArray(detalle)) return detalle.map((d) => d.msg).join(' · ');
   if (typeof detalle === 'string') return detalle;
   return fallback || `Error ${error.response.status}.`;
+}
+
+const ALIMENTOS_SOPORTADOS = [
+  'Banano', 'Manzana', 'Naranja', 'Mandarina', 'Papaya', 'Piña', 'Mango',
+  'Fresa', 'Uva', 'Pera', 'Aguacate', 'Maracuyá', 'Limón', 'Tomate',
+  'Pepino', 'Pimentón', 'Zanahoria', 'Cebolla cabezona', 'Cebolla larga',
+  'Lechuga', 'Espinaca', 'Brócoli', 'Habichuela', 'Repollo', 'Plátano',
+  'Papa', 'Yuca', 'Arracacha', 'Remolacha', 'Cilantro',
+];
+
+function DisclaimerModelo() {
+  const [expandido, setExpandido] = useState(false);
+  return (
+    <View style={styles.disclaimer}>
+      <View style={styles.disclaimerHeader}>
+        <Text style={styles.disclaimerTitulo}>⚠️  Limitaciones del modelo</Text>
+        <TouchableOpacity onPress={() => setExpandido((v) => !v)}>
+          <Text style={styles.disclaimerToggle}>{expandido ? 'Ocultar ▲' : 'Ver más ▼'}</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.disclaimerTexto}>
+        Este modelo <Text style={styles.disclaimerBold}>no tiene precisión del 100%</Text> y puede cometer errores. Verifica siempre el resultado antes de guardarlo.
+      </Text>
+      {expandido && (
+        <>
+          <Text style={[styles.disclaimerTexto, { marginTop: 8 }]}>
+            Actualmente reconoce <Text style={styles.disclaimerBold}>{ALIMENTOS_SOPORTADOS.length} alimentos</Text>. Si el tuyo no aparece aquí, el resultado puede ser incorrecto:
+          </Text>
+          <View style={styles.chipGrid}>
+            {ALIMENTOS_SOPORTADOS.map((a) => (
+              <View key={a} style={styles.chip}>
+                <Text style={styles.chipTexto}>{a}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+    </View>
+  );
 }
 
 export default function EscanearAlimentoScreen({ navigation }) {
@@ -100,12 +139,8 @@ export default function EscanearAlimentoScreen({ navigation }) {
       <Text style={styles.subtitle}>
         Apunta a una fruta o verdura completa, con buena luz y sin objetos que la tapen.
       </Text>
-      <View style={styles.supportedBox}>
-        <Text variant="titleSmall">Alimentos reconocibles</Text>
-        <Text style={styles.supportedText}>
-          Banano, manzana, naranja, tomate, pepino, pimentón y papa.
-        </Text>
-      </View>
+
+      <DisclaimerModelo />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -167,14 +202,18 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F7F5' },
   title: { marginBottom: 8, paddingHorizontal: 24, paddingTop: 24 },
   subtitle: { color: '#666', marginBottom: 16, paddingHorizontal: 24 },
-  supportedBox: {
-    marginHorizontal: 24,
-    marginBottom: 16,
-    padding: 12,
-    backgroundColor: '#E8F5E9',
-    borderRadius: 8,
+  disclaimer: {
+    backgroundColor: '#FFF3E0', borderLeftWidth: 4, borderLeftColor: '#E65100',
+    borderRadius: 10, marginHorizontal: 24, marginBottom: 20, padding: 14,
   },
-  supportedText: { color: '#345C38', marginTop: 4 },
+  disclaimerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  disclaimerTitulo: { fontWeight: 'bold', color: '#BF360C', fontSize: 13 },
+  disclaimerToggle: { color: '#E65100', fontSize: 12, fontWeight: '600' },
+  disclaimerTexto: { color: '#4E2600', fontSize: 13, lineHeight: 19 },
+  disclaimerBold: { fontWeight: 'bold' },
+  chipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  chip: { backgroundColor: '#FFE0B2', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  chipTexto: { color: '#4E2600', fontSize: 12 },
   placeholder: {
     width: '90%',
     alignSelf: 'center',

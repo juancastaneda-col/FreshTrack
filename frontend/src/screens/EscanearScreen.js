@@ -202,6 +202,13 @@ export default function EscanearScreen() {
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {exito ? <Text style={styles.exito}>{exito}</Text> : null}
 
+        <View style={styles.consejo}>
+          <Text style={styles.consejoIcono}>📸</Text>
+          <Text style={styles.consejoTexto}>
+            Para mejores resultados, fotografía <Text style={styles.consejoBold}>solo la sección de productos</Text> de tu factura, sin encabezados ni totales.
+          </Text>
+        </View>
+
         {imagen ? (
           <Image source={{ uri: imagen }} style={styles.preview} />
         ) : (
@@ -327,6 +334,14 @@ const styles = StyleSheet.create({
   },
   lineaHeader: { flexDirection: 'row', alignItems: 'center' },
   lineaRow: { flexDirection: 'row', marginTop: 8 },
+  consejo: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#FFF8E1', borderLeftWidth: 4, borderLeftColor: '#F9A825',
+    borderRadius: 10, marginHorizontal: 24, marginBottom: 20, padding: 14, gap: 10,
+  },
+  consejoIcono: { fontSize: 22 },
+  consejoTexto: { flex: 1, color: '#4E3B00', fontSize: 14, lineHeight: 20 },
+  consejoBold: { fontWeight: 'bold' },
   error: { color: '#b3261e', backgroundColor: '#fdecea', padding: 10, borderRadius: 8, marginHorizontal: 24, marginBottom: 12, textAlign: 'center' },
   aviso: { color: '#5a3d00', backgroundColor: '#FFF4E5', padding: 10, borderRadius: 8, marginHorizontal: 24, marginBottom: 12, textAlign: 'center' },
   exito: { color: '#1B5E20', backgroundColor: '#E8F5E9', padding: 10, borderRadius: 8, marginHorizontal: 24, marginBottom: 12, textAlign: 'center' },
