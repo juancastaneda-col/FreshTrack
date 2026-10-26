@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react';
-import { View, StyleSheet, Alert, Platform, ScrollView, Switch } from 'react-native';
+import { View, StyleSheet, Platform, ScrollView, Switch } from 'react-native';
 import { Text, TextInput, Button, ActivityIndicator, Divider, List } from 'react-native-paper';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { api } from '../services/api';
+import { avisar } from '../utils/avisar';
+import { colores, fuentes, sombras } from '../theme/theme';
 
 export default function CuentaScreen() {
   const navigation = useNavigation();
@@ -59,9 +61,9 @@ export default function CuentaScreen() {
     setEnviandoPrueba(true);
     try {
       const { data } = await api.post('/api/v1/alertas/prueba');
-      Alert.alert('Correo enviado', `Se envió un correo de prueba a ${data.mensaje.replace('Correo de prueba enviado a ', '')}.`);
+      avisar('Correo enviado', `Se envió un correo de prueba a ${data.mensaje.replace('Correo de prueba enviado a ', '')}.`);
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.detail || 'No se pudo enviar el correo.');
+      avisar('Error', error.response?.data?.detail || 'No se pudo enviar el correo.');
     } finally {
       setEnviandoPrueba(false);
     }
@@ -74,9 +76,9 @@ export default function CuentaScreen() {
         notificaciones_activas: notifActivas,
         correo_notificaciones: correoNotif.trim() || null,
       });
-      Alert.alert('Listo', 'Preferencias de notificación guardadas.');
+      avisar('Listo', 'Preferencias de notificación guardadas.');
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.detail || 'No se pudo guardar.');
+      avisar('Error', error.response?.data?.detail || 'No se pudo guardar.');
     } finally {
       setGuardandoNotif(false);
     }
@@ -96,16 +98,16 @@ export default function CuentaScreen() {
 
   const guardarNombre = async () => {
     if (!nombre.trim()) {
-      Alert.alert('Nombre inválido', 'El nombre no puede quedar vacío.');
+      avisar('Nombre inválido', 'El nombre no puede quedar vacío.');
       return;
     }
     setGuardando(true);
     try {
       await api.patch('/api/v1/auth/me', { nombre: nombre.trim() });
-      Alert.alert('Listo', 'Tu nombre se actualizó.');
+      avisar('Listo', 'Tu nombre se actualizó.');
       setEditando(false);
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.detail || 'No se pudo actualizar.');
+      avisar('Error', error.response?.data?.detail || 'No se pudo actualizar.');
     } finally {
       setGuardando(false);
     }
@@ -113,7 +115,7 @@ export default function CuentaScreen() {
 
   const cambiarPassword = async () => {
     if (!passwordActual || !nuevaPassword) {
-      Alert.alert('Campos incompletos', 'Ingresa tu contraseña actual y la nueva.');
+      avisar('Campos incompletos', 'Ingresa tu contraseña actual y la nueva.');
       return;
     }
     setCambiandoPassword(true);
@@ -122,11 +124,11 @@ export default function CuentaScreen() {
         password_actual: passwordActual,
         nueva_password: nuevaPassword,
       });
-      Alert.alert('Listo', 'Tu contraseña se actualizó.');
+      avisar('Listo', 'Tu contraseña se actualizó.');
       setPasswordActual('');
       setNuevaPassword('');
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.detail || 'No se pudo cambiar la contraseña.');
+      avisar('Error', error.response?.data?.detail || 'No se pudo cambiar la contraseña.');
     } finally {
       setCambiandoPassword(false);
     }
@@ -148,7 +150,16 @@ export default function CuentaScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text variant="headlineMedium" style={styles.title}>Mi cuenta</Text>
+      <View style={styles.perfil}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarLetra}>{(nombre || correo || '?').trim().charAt(0).toUpperCase()}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.perfilNombre} numberOfLines={1}>{nombre || 'Mi cuenta'}</Text>
+          <Text style={styles.perfilCorreo} numberOfLines={1}>{correo}</Text>
+        </View>
+        <Text style={{ fontSize: 30 }}>🥬</Text>
+      </View>
 
       <View style={styles.card}>
         <Text style={styles.etiqueta}>Correo electrónico</Text>
@@ -291,18 +302,38 @@ export default function CuentaScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F7F5' },
+  container: { flex: 1, backgroundColor: colores.fondo },
   content: { padding: 24 },
   title: { marginBottom: 20 },
-  card: { backgroundColor: '#FFF', borderRadius: 12, padding: 16 },
-  etiqueta: { fontSize: 13, color: '#666' },
+  card: { backgroundColor: '#FFF', borderRadius: 20, padding: 16, boxShadow: sombras.suave },
+  perfil: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colores.selva,
+    borderRadius: 24,
+    padding: 16,
+    marginBottom: 20,
+    gap: 12,
+  },
+  avatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colores.mango,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarLetra: { fontFamily: fuentes.titulo, fontSize: 28, color: colores.selva },
+  perfilNombre: { fontFamily: fuentes.subtitulo, fontSize: 20, color: colores.blanco },
+  perfilCorreo: { fontFamily: fuentes.textoMedio, fontSize: 13, color: 'rgba(255,255,255,0.8)' },
+  etiqueta: { fontSize: 13, color: colores.suave, fontFamily: fuentes.textoMedio },
   valorFijo: { marginTop: 2 },
   input: { marginTop: 8, marginBottom: 4, backgroundColor: '#FFF' },
   filaValor: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   filaBotones: { flexDirection: 'row', marginTop: 8 },
-  historialVacio: { color: '#666', marginVertical: 8 },
+  historialVacio: { color: colores.suave, marginVertical: 8, fontFamily: fuentes.texto },
   cerrarBoton: { marginTop: 24 },
   filaSwitch: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  labelSwitch: { fontSize: 15, flex: 1, marginRight: 8 },
-  etiquetaHint: { fontSize: 12, color: '#888', marginBottom: 4 },
+  labelSwitch: { fontSize: 15, flex: 1, marginRight: 8, fontFamily: fuentes.textoMedio },
+  etiquetaHint: { fontSize: 12, color: colores.suave, marginBottom: 4, fontFamily: fuentes.texto },
 });
